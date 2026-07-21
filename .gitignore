@@ -24,6 +24,13 @@ agents_workspace/
 *.log
 logs/
 
+# Runtime data caches (运行时生成的数据缓存，勿提交)
+data_cache/
+**/data_cache/
+*_cache/
+stock_summary_akshare_cache/
+akshare_cache/
+
 # macOS
 .DS_Store
 

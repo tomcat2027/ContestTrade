@@ -496,15 +496,32 @@ class LLMModel(BaseAgentModel):
                 full_content = ""
                 raw_chunks = []
 
-                async for chunk in stream:
-                    if chunk.is_reasoning:
-                        reasoning_content += chunk.content
-                    else:
-                        full_content += chunk.content
-                    if chunk.raw_chunk is not None:
-                        raw_chunks.append(chunk.raw_chunk)
-                        if verbose:
-                            print(chunk.content, end="", flush=True)
+                # 流式接收总超时保护：避免连接建立后 chunk 不来导致永久挂起
+                # 总超时 = 单次 timeout × 3，给长摘要/推理留足时间
+                stream_total_timeout = max(timeout * 3, 180) if timeout else 180
+
+                async def _collect_stream():
+                    async for chunk in stream:
+                        if chunk.is_reasoning:
+                            reasoning_content_local[0] += chunk.content
+                        else:
+                            full_content_local[0] += chunk.content
+                        if chunk.raw_chunk is not None:
+                            raw_chunks_local[0].append(chunk.raw_chunk)
+                            if verbose:
+                                print(chunk.content, end="", flush=True)
+
+                # 用可变容器让内部协程能写回（绕过闭包只读限制）
+                reasoning_content_local = [""]
+                full_content_local = [""]
+                raw_chunks_local = [[]]
+                try:
+                    await asyncio.wait_for(_collect_stream(), timeout=stream_total_timeout)
+                except asyncio.TimeoutError:
+                    raise TimeoutError(f"流式接收超时({stream_total_timeout}秒)，可能连接挂起")
+                reasoning_content = reasoning_content_local[0]
+                full_content = full_content_local[0]
+                raw_chunks = raw_chunks_local[0]
 
                 if post_process_func is not None:
                     proc_response = post_process_func(full_content)
@@ -513,6 +530,12 @@ class LLMModel(BaseAgentModel):
 
                 call_elapsed = time.time() - call_start
                 logger.info(f"[耗时] LLM调用完成 ({model_name}): {call_elapsed:.2f}秒, 输出tokens约{len(full_content)//4}")
+
+                # 空响应保护：内容过短（含思考内容）视为异常，触发重试
+                # 避免限流/异常返回的空内容被当成成功结果（如 DeepSeek 限流后返回 ~50 字符废内容）
+                effective_content = full_content if not reasoning_content else (full_content + reasoning_content)
+                if len(effective_content.strip()) < 20 and attempt < max_retries:
+                    raise ValueError(f"空响应或内容过短({len(effective_content.strip())}字符)，疑似限流/异常返回")
 
                 # Create a response with the collected content
                 return ModelResponse(

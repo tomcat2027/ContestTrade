@@ -40,15 +40,34 @@ class ProjectConfig:
 
     def _load_secrets_from_env(self):
         """从环境变量加载敏感配置，优先于 YAML 中的值"""
-        # 阿里云百炼 API Key
-        if os.environ.get("DASHSCOPE_API_KEY"):
-            dashscope_key = os.environ.get("DASHSCOPE_API_KEY")
+        # LLM API Key：按配置文件实际指向的端点匹配对应 key
+        # base_url 含 longcat -> LONGCAT_API_KEY；含 sensenova/deepseek -> DEEPSEEK_API_KEY
+        # 都不匹配时回退顺序：LONGCAT -> DEEPSEEK -> DASHSCOPE
+        llm_base = (self.llm.get("base_url", "") if hasattr(self, "llm") else "").lower()
+        if "longcat" in llm_base:
+            llm_key = os.environ.get("LONGCAT_API_KEY")
+        elif "sensenova" in llm_base or "deepseek" in llm_base:
+            llm_key = os.environ.get("DEEPSEEK_API_KEY")
+        else:
+            llm_key = os.environ.get("LONGCAT_API_KEY") or os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("DASHSCOPE_API_KEY")
+        if llm_key:
             if hasattr(self, "llm"):
-                self.llm["api_key"] = dashscope_key
+                self.llm["api_key"] = llm_key
             if hasattr(self, "llm_thinking"):
-                self.llm_thinking["api_key"] = dashscope_key
-            if hasattr(self, "vlm"):
-                self.vlm["api_key"] = dashscope_key
+                self.llm_thinking["api_key"] = llm_key
+
+        # VLM API Key：按 vlm 配置的 base_url 匹配对应 key（与 LLM 同逻辑）
+        vlm_base = (self.vlm.get("base_url", "") if hasattr(self, "vlm") else "").lower()
+        if "longcat" in vlm_base:
+            vlm_key = os.environ.get("LONGCAT_API_KEY")
+        elif "minimax" in vlm_base:
+            vlm_key = os.environ.get("MINIMAX_API_KEY")
+        elif "sensenova" in vlm_base or "deepseek" in vlm_base:
+            vlm_key = os.environ.get("DEEPSEEK_API_KEY")
+        else:
+            vlm_key = llm_key
+        if vlm_key and hasattr(self, "vlm"):
+            self.vlm["api_key"] = vlm_key
 
         # Tushare Key
         if os.environ.get("TUSHARE_KEY"):

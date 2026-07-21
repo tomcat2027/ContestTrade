@@ -421,6 +421,11 @@ class PriceMarketAkshare(DataSourceBase):
 - **请把输出的宏观描述严格控制在2000字符以内，不要超过2000字符**
 
 请基于事实数据生成客观的市场描述报告：
+
+## 语言与格式要求（必须严格遵守）
+- **必须使用中文输出**，禁止使用英文（股票代码、指标缩写如MA5/MACD/RSI除外）
+- **直接输出分析报告正文**，禁止输出思考过程、推理步骤、分析前言（如"让我分析一下"、"Let me analyze"等）
+- 不要复述原始数据，直接给结论性描述
 """
             
             if GLOBAL_VISION_LLM and has_kline_charts_base64:

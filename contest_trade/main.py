@@ -303,50 +303,63 @@ class SimpleTradeCompany:
         return signals
 
     def _parse_single_signal_block(self, signal_block: str, thinking: str):
-        """解析单个信号块"""
+        """解析单个信号块（容错版：标签闭合错误/字段缺失不全丢）"""
         try:
-            has_opportunity = re.search(r"<has_opportunity>(.*?)</has_opportunity>", signal_block, flags=re.DOTALL).group(1).strip()
-            action = re.search(r"<action>(.*?)</action>", signal_block, flags=re.DOTALL).group(1).strip()
-            symbol_code = re.search(r"<symbol_code>(.*?)</symbol_code>", signal_block, flags=re.DOTALL).group(1).strip()
-            symbol_name = re.search(r"<symbol_name>(.*?)</symbol_name>", signal_block, flags=re.DOTALL).group(1).strip()
-            
-            # 解析evidence_list
-            evidence_list_str = re.search(r"<evidence_list>(.*?)</evidence_list>", signal_block, flags=re.DOTALL).group(1)
-            evidence_list = []
-            for item in evidence_list_str.split("<evidence>"):
-                if '</evidence>' not in item:
-                    continue
-                evidence_description = item.split("</evidence>")[0].strip()
-                try:
-                    evidence_time = re.search(r"<time>(.*?)</time>", item, flags=re.DOTALL).group(1).strip()
-                except:
-                    evidence_time = "N/A"
-                try:
-                    evidence_from_source = re.search(r"<from_source>(.*?)</from_source>", item, flags=re.DOTALL).group(1).strip()
-                except:
-                    evidence_from_source = "N/A"
-                    
-                evidence_list.append({
-                    "description": evidence_description,
-                    "time": evidence_time,
-                    "from_source": evidence_from_source,
-                })
+            def _field(tag: str, default: str = "") -> str:
+                """宽松提取字段：匹配 <tag> 到下一个 < 之间的内容，不依赖精确闭标签。
+                兼容 LongCat 常见的 <symbol_code>xxx</symbol_name> 闭合错误。"""
+                m = re.search(rf"<{tag}>\s*(.*?)(?=<|$)", signal_block, flags=re.DOTALL)
+                return m.group(1).strip() if m else default
 
-            # 解析limitations
-            limitations_str = re.search(r"<limitations>(.*?)</limitations>", signal_block, flags=re.DOTALL).group(1)
-            limitations = re.findall(r"<limitation>(.*?)</limitation>", limitations_str, flags=re.DOTALL)
-            limitations = [l.strip() for l in limitations]
-            
-            # 解析probability
-            probability = re.search(r"<probability>(.*?)</probability>", signal_block, flags=re.DOTALL).group(1).strip()
-            
-            # 修正symbol信息
+            has_opportunity = _field("has_opportunity")
+            action = _field("action")
+            symbol_code = _field("symbol_code")
+            symbol_name = _field("symbol_name")
+
+            # 关键字段全缺才丢弃（避免因单个标签错位丢整块信号）
+            if not has_opportunity and not symbol_code and not symbol_name:
+                return None
+
+            # 解析evidence_list（容错：缺失则空列表）
+            evidence_list = []
+            evidence_list_str = re.search(r"<evidence_list>(.*?)(?=<limitations>|<probability>|</signal>|$)", signal_block, flags=re.DOTALL)
+            if evidence_list_str:
+                for item in evidence_list_str.group(1).split("<evidence>"):
+                    if '</evidence>' not in item:
+                        continue
+                    evidence_description = item.split("</evidence>")[0].strip()
+                    try:
+                        evidence_time = re.search(r"<time>(.*?)(?=<|$)", item, flags=re.DOTALL).group(1).strip()
+                    except:
+                        evidence_time = "N/A"
+                    try:
+                        evidence_from_source = re.search(r"<from_source>(.*?)(?=<|$)", item, flags=re.DOTALL).group(1).strip()
+                    except:
+                        evidence_from_source = "N/A"
+
+                    evidence_list.append({
+                        "description": evidence_description,
+                        "time": evidence_time,
+                        "from_source": evidence_from_source,
+                    })
+
+            # 解析limitations（容错：缺失则空列表）
+            limitations = []
+            limitations_str = re.search(r"<limitations>(.*?)(?=<probability>|</signal>|$)", signal_block, flags=re.DOTALL)
+            if limitations_str:
+                limitations = re.findall(r"<limitation>(.*?)</limitation>", limitations_str.group(1), flags=re.DOTALL)
+                limitations = [l.strip() for l in limitations]
+
+            # 解析probability（容错：缺失则空串）
+            probability = _field("probability")
+
+            # 修正symbol信息：name/code 互查补全（fix_symbol_code 能从 name 反查 code）
             symbol_name, symbol_code = GLOBAL_MARKET_MANAGER.fix_symbol_code("CN-Stock", symbol_name, symbol_code)
-            
+
             return {
                 "thinking": thinking,
-                "has_opportunity": has_opportunity,
-                "action": action,   
+                "has_opportunity": has_opportunity or "yes",
+                "action": action or "buy",
                 "symbol_code": symbol_code,
                 "symbol_name": symbol_name,
                 "evidence_list": evidence_list,
