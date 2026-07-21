@@ -589,21 +589,22 @@ def parse_data_report(content: str) -> dict:
     # 截取"数据源分析详情"之后的内容（跳过开头元信息）
     m = re.search(r"数据源分析详情\s*\n(.+?)(?=\n##\s*⚠|免责声明|\Z)", content, flags=re.DOTALL)
     body = m.group(1) if m else content
-    # 按 ### 📈 XXX Agent 分块（用多行模式 ^ 匹配，避免漏掉首个 agent）
-    blocks = re.split(r"^###\s+[📈📊🔍💡]?\s*", body, flags=re.MULTILINE)
+    # 按 ### 📈 XXX Agent 分块：emoji 必选，避免把正文里的 "### 1. xxx" 新闻小标题误切成 agent
+    blocks = re.split(r"^###\s+[📈📊🔍💡]\s+", body, flags=re.MULTILINE)
     for block in blocks:
         if not block.strip():
             continue
         lines = block.split("\n", 1)
         agent_name = lines[0].strip()
         agent_body = lines[1].strip() if len(lines) > 1 else ""
-        # 去掉 agent 摘要里重复的 "# 市场信息综合摘要" 和孤立的 "时间：xxx" 行
-        agent_body = re.sub(r"^#\s*市场信息综合摘要\s*\n+", "", agent_body)
-        agent_body = re.sub(r"^\*\*时间[：:].*?\*\*\s*\n+", "", agent_body, flags=re.MULTILINE)
-        # 清理 LongCat 检索残留: "Documents: Title: xxx Publish Time: xxx Content:  😐..." 前缀
-        agent_body = re.sub(r"^Documents:\s*Title:[^\n]*\nPublish Time:[^\n]*\nContent:\s*", "", agent_body)
-        # 剥掉正文开头残留的分隔横线（时间行之后的 ---），章节内部的横线保留
-        agent_body = re.sub(r"\A\s*-{3,}\s*\n+", "", agent_body)
+        # 一次性剥掉 agent 正文开头的"标题/时间行/Documents残留/分隔横线"任意组合（只在开头 \A 匹配）
+        # 兼容: # 市场信息综合摘要(可能带日期后缀) / **时间:** 或 **汇总时间:** / LongCat 检索前缀 / --- 横线
+        agent_body = re.sub(
+            r"\A(?:#\s*市场信息综合摘要[^\n]*\n+)?"
+            r"(?:\*\*(?:汇总)?时间[：:].*?\*\*\s*\n+)?"
+            r"(?:Documents:\s*Title:[^\n]*\nPublish Time:[^\n]*\nContent:\s*)?"
+            r"(?:-{3,}\s*\n+)?",
+            "", agent_body)
         if agent_name and agent_body:
             result["agents"].append({"name": agent_name, "body": agent_body})
     return result
