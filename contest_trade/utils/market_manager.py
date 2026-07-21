@@ -849,7 +849,10 @@ class MarketManager:
                         print(f"set stock_code: {symbol_code} to {stock_act_code}")
                     symbol_code = stock_act_code
             stock_act_name = stock_code2name.get(symbol_code, "xxxxx")
-            if stock_act_name in symbol_name and stock_act_name != symbol_name:
+            # name 为空时直接用 code 反查的 name 补全
+            if not symbol_name and stock_act_name != "xxxxx":
+                symbol_name = stock_act_name
+            elif stock_act_name in symbol_name and stock_act_name != symbol_name:
                 if verbose:
                     print(f"set stock_name: {symbol_name} to {stock_act_name}")
                 if stock_act_name != "xxxxx":
