@@ -101,6 +101,21 @@ HTML = """<!DOCTYPE html>
   .empty-state .hint { font-size: 14px; }
   .empty-state .sub-hint { font-family: var(--mono); font-size: 11px; color: var(--muted); }
 
+  /* ===== Tab 切换栏 ===== */
+  .tab-bar { display: flex; gap: 2px; padding: 0 56px; border-bottom: 1px solid var(--border); background: var(--bg-2); position: sticky; top: 0; z-index: 10; }
+  .tab { font-family: var(--sans); font-size: 14px; padding: 16px 22px; border: none; background: transparent; color: var(--text-2); cursor: pointer; border-bottom: 2px solid transparent; transition: color .15s, border-color .15s; letter-spacing: 0.2px; }
+  .tab:hover { color: var(--text); }
+  .tab.on { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+  .tab:disabled { color: var(--border); cursor: not-allowed; }
+  .tab-bar .tab-spacer { flex: 1; }
+  .tab-bar .tab-meta { font-family: var(--mono); font-size: 11px; color: var(--muted); align-self: center; }
+
+  /* ===== 历史运行折叠 ===== */
+  .history-toggle { padding: 9px 24px; font-family: var(--mono); font-size: 11px; color: var(--muted); cursor: pointer; border-left: 2px solid transparent; transition: background .12s, color .12s; }
+  .history-toggle:hover { background: var(--panel-2); color: var(--text-2); }
+  .history-toggle::before { content: "▸ "; }
+  .history-toggle.open::before { content: "▾ "; }
+
   /* ===== 报告头 ===== */
   .report-head { padding: 48px 56px 32px; border-bottom: 1px solid var(--border); }
   .rh-eyebrow { font-family: var(--mono); font-size: 11px; color: var(--accent); text-transform: uppercase; letter-spacing: 2px; margin-bottom: 16px; }
@@ -215,73 +230,165 @@ HTML = """<!DOCTYPE html>
   </main>
 </div>
 <script>
-let currentPath = null;
+let reportsData = {dates: []};
+let currentRun = null;   // {date, time, finalData, dataData}
+let currentTab = 'final'; // 'final' | 'data'
 marked.setOptions({ gfm: true, breaks: false });
 
 async function loadReports() {
   try {
     const r = await fetch('/api/reports');
     const d = await r.json();
-    renderSidebar(d.reports);
-    const n = d.reports.length;
-    document.getElementById('status').textContent = n + ' 份报告 · ' + new Date().toLocaleTimeString('zh-CN');
+    reportsData = d;
+    renderSidebar(d);
+    const n = (d.dates || []).reduce((s, x) => s + x.runs.length, 0);
+    document.getElementById('status').textContent = n + ' 次运行 · ' + new Date().toLocaleTimeString('zh-CN');
     document.getElementById('dot').classList.toggle('idle', n === 0);
+    // 首次加载自动选中最新日期的最新运行
+    if (!currentRun && d.dates.length && d.dates[0].runs.length) {
+      loadRun(d.dates[0].date, d.dates[0].runs[0].time);
+    } else if (currentRun) {
+      markActive();
+    }
   } catch(e) {
     document.getElementById('status').textContent = '连接失败';
     document.getElementById('dot').classList.add('idle');
   }
 }
 
-function renderSidebar(reports) {
-  const groups = {};
-  reports.forEach(r => {
-    const g = r.type === 'research_reports' ? '研究报告' : r.type === 'data_reports' ? '数据报告' : r.type;
-    (groups[g] = groups[g] || []).push(r);
-  });
-  let html = '';
-  for (const g of Object.keys(groups)) {
-    html += '<div class="side-section"><div class="side-title"><span>' + g + '</span><span class="count">' + groups[g].length + '</span></div>';
-    groups[g].forEach(r => {
-      const t = new Date(r.mtime * 1000).toLocaleString('zh-CN', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
-      const active = r.path === currentPath ? 'active' : '';
-      const tlabel = r.type === 'research_reports' ? 'RES' : 'DATA';
-      html += '<div class="report-item ' + active + '" data-path="' + r.path + '"><div class="rname"><span class="rtype">' + tlabel + '</span>' + r.name + '</div><div class="rmeta">' + t + ' · ' + (r.size/1024).toFixed(1) + 'KB</div></div>';
-    });
-    html += '</div>';
+function findRun(date, time) {
+  for (const d of (reportsData.dates || [])) {
+    if (d.date === date) {
+      for (const r of d.runs) {
+        if (r.time === time) return r;
+      }
+    }
   }
+  return null;
+}
+
+function renderSidebar(data) {
+  const dates = data.dates || [];
+  if (!dates.length) {
+    document.getElementById('sidebar').innerHTML = '<div class="empty-state" style="height:200px"><div class="sub-hint">暂无报告</div></div>';
+    return;
+  }
+  let html = '';
+  dates.forEach(d => {
+    const latest = d.runs[0];
+    const oldRuns = d.runs.slice(1);
+    html += '<div class="side-section">';
+    html += '<div class="side-title"><span>' + d.date + '</span><span class="count">' + d.runs.length + ' 次运行</span></div>';
+    html += runItemHtml(d.date, latest, true);
+    if (oldRuns.length) {
+      html += '<div class="history-toggle" data-date="' + d.date + '">历史运行 ' + oldRuns.length + ' 次</div>';
+      html += '<div class="history-list" id="hist-' + d.date + '" style="display:none">';
+      oldRuns.forEach(r => { html += runItemHtml(d.date, r, false); });
+      html += '</div>';
+    }
+    html += '</div>';
+  });
   const sb = document.getElementById('sidebar');
-  sb.innerHTML = html || '<div class="empty-state" style="height:200px"><div class="sub-hint">暂无报告</div></div>';
+  sb.innerHTML = html;
   sb.querySelectorAll('.report-item').forEach(el => {
-    el.addEventListener('click', () => loadReport(el.dataset.path));
+    el.addEventListener('click', () => loadRun(el.dataset.date, el.dataset.time));
+  });
+  sb.querySelectorAll('.history-toggle').forEach(el => {
+    el.addEventListener('click', () => {
+      const list = document.getElementById('hist-' + el.dataset.date);
+      const open = list.style.display !== 'none';
+      list.style.display = open ? 'none' : 'block';
+      el.classList.toggle('open', !open);
+    });
+  });
+  markActive();
+}
+
+function runItemHtml(date, run, isLatest) {
+  const hasF = !!run.final;
+  const hasD = !!run.data;
+  const active = (currentRun && currentRun.date === date && currentRun.time === run.time) ? 'active' : '';
+  let tags = '';
+  if (hasF) tags += '<span class="rtype">RES</span>';
+  if (hasD) tags += '<span class="rtype">DATA</span>';
+  const timeLabel = (isLatest ? '最新 ' : '') + run.time;
+  const desc = (hasF ? '事件驱动选股' : '') + (hasF && hasD ? ' · ' : '') + (hasD ? '数据源分析' : '');
+  return '<div class="report-item ' + active + '" data-date="' + date + '" data-time="' + run.time + '">'
+    + '<div class="rname">' + tags + ' ' + timeLabel + '</div>'
+    + '<div class="rmeta">' + desc + '</div></div>';
+}
+
+function markActive() {
+  document.querySelectorAll('.report-item').forEach(el => {
+    el.classList.toggle('active', currentRun && el.dataset.date === currentRun.date && el.dataset.time === currentRun.time);
   });
 }
 
-async function loadReport(path) {
-  currentPath = path;
-  document.getElementById('main').innerHTML = '<div class="empty-state"><div class="hint">加载中…</div></div>';
-  document.querySelectorAll('.report-item').forEach(el => el.classList.toggle('active', el.dataset.path === path));
+async function fetchReport(path) {
+  if (!path) return null;
   try {
     const r = await fetch('/api/report?path=' + encodeURIComponent(path) + '&structured=1');
-    const d = await r.json();
-    if (d.error) { renderError(d.error); return; }
-    if (d.structured && d.structured.signals) {
-      renderStructured(d.structured);
-    } else if (d.structured && d.structured.agents) {
-      renderDataReport(d.structured, d.name);
-    } else {
-      renderFallback(d.content, d.name);
-    }
-  } catch(e) { renderError('加载失败'); }
+    return await r.json();
+  } catch(e) { return null; }
+}
+
+async function loadRun(date, time) {
+  const run = findRun(date, time);
+  if (!run) return;
+  currentRun = {date, time};
+  markActive();
+  document.getElementById('main').innerHTML = '<div class="empty-state"><div class="hint">加载中…</div></div>';
+  const [fRes, dRes] = await Promise.all([fetchReport(run.final && run.final.path), fetchReport(run.data && run.data.path)]);
+  currentRun.finalData = fRes;
+  currentRun.dataData = dRes;
+  // 默认展示事件驱动选股；若 final 不存在则退到数据源分析
+  currentTab = fRes ? 'final' : (dRes ? 'data' : 'final');
+  renderCurrent();
+}
+
+function switchTab(tab) {
+  currentTab = tab;
+  renderCurrent();
+  document.querySelector('.main').scrollTop = 0;
+}
+
+function renderCurrent() {
+  if (!currentRun) return;
+  const fd = currentRun.finalData;
+  const dd = currentRun.dataData;
+  let html = '<div class="tab-bar">';
+  html += '<button class="tab ' + (currentTab==='final'?'on':'') + '" data-tab="final" ' + (fd?'':'disabled') + '>事件驱动选股</button>';
+  html += '<button class="tab ' + (currentTab==='data'?'on':'') + '" data-tab="data" ' + (dd?'':'disabled') + '>数据源分析详情</button>';
+  html += '<div class="tab-spacer"></div>';
+  html += '<div class="tab-meta">' + currentRun.date + ' ' + currentRun.time + '</div>';
+  html += '</div>';
+  let body = '';
+  if (currentTab === 'final' && fd) {
+    body = (fd.structured && fd.structured.signals) ? renderFinalHtml(fd.structured) : renderFallbackHtml(fd.content, fd.name);
+  } else if (currentTab === 'data' && dd) {
+    body = (dd.structured && dd.structured.agents) ? renderDataHtml(dd.structured, dd.name) : renderFallbackHtml(dd.content, dd.name);
+  } else {
+    body = '<div class="empty-state"><div class="glyph">◇</div><div class="hint">该类型报告不存在</div></div>';
+  }
+  document.getElementById('main').innerHTML = html + body;
+  document.querySelectorAll('.tab').forEach(t => {
+    if (!t.disabled) t.addEventListener('click', () => switchTab(t.dataset.tab));
+  });
+  document.querySelectorAll('.cell').forEach(c => {
+    c.addEventListener('click', () => {
+      const el = document.getElementById('sig-' + c.dataset.idx);
+      if (el) el.scrollIntoView({behavior:'smooth', block:'start'});
+    });
+  });
 }
 
 function renderError(msg) {
   document.getElementById('main').innerHTML = '<div class="empty-state"><div class="glyph">◇</div><div class="hint">' + msg + '</div></div>';
 }
 
-function renderDataReport(s, name) {
-  // 数据报告：按数据 agent 分组渲染，剥掉开头元信息
+function renderDataHtml(s, name) {
   const agents = s.agents || [];
-  let html = '<div class="report-head"><div class="rh-eyebrow">数据分析 · 4 个数据源</div>';
+  let html = '<div class="report-head"><div class="rh-eyebrow">数据分析 · ' + agents.length + ' 个数据源</div>';
   html += '<div class="rh-title">数据源分析详情</div>';
   html += '<div class="rh-time">' + name.replace('.md','').replace(/_/g,' ') + ' · 各数据 agent 摘要</div></div>';
   html += '<div class="signals"><div class="signals-title">数据 Agent 摘要</div>';
@@ -293,14 +400,13 @@ function renderDataReport(s, name) {
   });
   html += '</div>';
   html += '<div class="disclaimer"><strong>免责声明</strong>　本报告由 ContestTrade AI 系统生成，仅供学术研究，不构成任何投资建议。数据源可能存在延迟或不准确，投资有风险，入市需谨慎。</div>';
-  document.getElementById('main').innerHTML = html;
+  return html;
 }
 
-function renderFallback(content, name) {
-  // 数据报告：用 marked 渲染 markdown，套用 .md-report 样式
+function renderFallbackHtml(content, name) {
   const html = marked.parse(content);
   const wrap = '<div class="report-head"><div class="rh-eyebrow">数据报告</div><div class="rh-title">' + name.replace('.md','').replace(/_/g,' ') + '</div></div>';
-  document.getElementById('main').innerHTML = wrap + '<div class="md-report">' + html + '</div>';
+  return wrap + '<div class="md-report">' + html + '</div>';
 }
 
 // 行业推断（用于矩阵条着色）
@@ -315,16 +421,15 @@ function inferIndustry(text) {
   return {name:'其他', color:'#8B8B8B'};
 }
 
-function renderStructured(s) {
+function renderFinalHtml(s) {
   const m = s.metrics || {};
   const sigs = s.signals || [];
   let html = '';
 
-  // 报告头
   html += '<div class="report-head">';
   html += '<div class="rh-eyebrow">ContestTrade 信号报告 · ' + (m.time || '') + '</div>';
   html += '<div class="rh-title">事件驱动选股 · ' + sigs.length + ' 个信号</div>';
-  html += '<div class="rh-time">分析时间 ' + (m.time || '—') + ' · 数据源 ' + (m.data_sources || '4') + ' · 有效率 ' + (m.valid_rate || '100%') + '</div>';
+  html += '<div class="rh-time">分析时间 ' + (m.time || '-') + ' · 数据源 ' + (m.data_sources || '4') + ' · 有效率 ' + (m.valid_rate || '100%') + '</div>';
   html += '<div class="metrics">';
   html += metric('信号总数', m.signal_count || sigs.length, 'gold');
   html += metric('有效信号', m.valid_count || sigs.length, 'up');
@@ -332,7 +437,6 @@ function renderStructured(s) {
   html += metric('有效率', m.valid_rate || '100%', 'up');
   html += '</div></div>';
 
-  // 信号矩阵条
   if (sigs.length) {
     html += '<div class="matrix-wrap">';
     html += '<div class="matrix-label"><span>信号矩阵 · 按行业分布</span><span>' + sigs.length + ' 个标的</span></div>';
@@ -344,14 +448,13 @@ function renderStructured(s) {
     html += '</div></div>';
   }
 
-  // 信号卡片
   html += '<div class="signals"><div class="signals-title">投资信号</div>';
   sigs.forEach((sg, i) => {
     const ind = inferIndustry(sg.name + ' ' + (sg.evidence||[]).join(' '));
     const action = (sg.action||'buy').toLowerCase();
     html += '<div class="signal-card" id="sig-' + i + '">';
     html += '<div class="sc-head"><div class="sc-idx">' + String(i+1).padStart(2,'0') + '</div>';
-    html += '<div class="sc-name">' + (sg.name || '—') + '</div>';
+    html += '<div class="sc-name">' + (sg.name || '-') + '</div>';
     html += '<div class="sc-code">' + (sg.code || '') + '</div>';
     html += '<div class="sc-badges">';
     html += '<span class="badge industry">' + ind.name + '</span>';
@@ -377,17 +480,8 @@ function renderStructured(s) {
   });
   html += '</div>';
 
-  // 免责
   html += '<div class="disclaimer"><strong>免责声明</strong>　本报告由 ContestTrade AI 系统生成，仅供学术研究，不构成任何投资建议。AI 模型存在幻觉风险，数据源可能延迟或不准确。投资有风险，入市需谨慎。</div>';
-
-  document.getElementById('main').innerHTML = html;
-  // 矩阵点击跳转
-  document.querySelectorAll('.cell').forEach(c => {
-    c.addEventListener('click', () => {
-      const el = document.getElementById('sig-' + c.dataset.idx);
-      if (el) el.scrollIntoView({behavior:'smooth', block:'start'});
-    });
-  });
+  return html;
 }
 
 function metric(label, value, cls) {
@@ -508,6 +602,8 @@ def parse_data_report(content: str) -> dict:
         agent_body = re.sub(r"^\*\*时间[：:].*?\*\*\s*\n+", "", agent_body, flags=re.MULTILINE)
         # 清理 LongCat 检索残留: "Documents: Title: xxx Publish Time: xxx Content:  😐..." 前缀
         agent_body = re.sub(r"^Documents:\s*Title:[^\n]*\nPublish Time:[^\n]*\nContent:\s*", "", agent_body)
+        # 剥掉正文开头残留的分隔横线（时间行之后的 ---），章节内部的横线保留
+        agent_body = re.sub(r"\A\s*-{3,}\s*\n+", "", agent_body)
         if agent_name and agent_body:
             result["agents"].append({"name": agent_name, "body": agent_body})
     return result
@@ -527,20 +623,36 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send_json(404, {"error": "not found"})
 
     def _list_reports(self):
-        reports = []
+        # 按文件名时间戳把 final_report / data_report 配对成"运行组"，再按日期分组
+        runs = {}  # (date, time) -> {"final": {...}, "data": {...}}
         if RESULTS_DIR.exists():
             for md in RESULTS_DIR.rglob("*.md"):
                 rel = md.relative_to(RESULTS_DIR)
                 st = md.stat()
-                reports.append({
-                    "type": str(rel.parts[0]) if len(rel.parts) > 1 else "root",
-                    "name": md.name,
+                name = md.name
+                ts = re.search(r"(\d{4}-\d{2}-\d{2})_(\d{2}-\d{2}-\d{2})", name)
+                if not ts:
+                    continue
+                date, tstr = ts.group(1), ts.group(2)
+                kind = "final" if rel.parts and rel.parts[0] == "research_reports" else "data"
+                runs.setdefault((date, tstr), {})[kind] = {
+                    "type": rel.parts[0] if len(rel.parts) > 1 else "root",
+                    "name": name,
                     "path": str(rel),
                     "mtime": st.st_mtime,
                     "size": st.st_size,
-                })
-        reports.sort(key=lambda x: x["mtime"], reverse=True)
-        self._send_json(200, {"reports": reports})
+                    "date": date,
+                    "time": tstr,
+                }
+        # 按日期分组，日期内按时间倒序
+        dates_map = {}
+        for (date, tstr), kinds in runs.items():
+            dates_map.setdefault(date, []).append({"time": tstr, **kinds})
+        dates = []
+        for date in sorted(dates_map.keys(), reverse=True):
+            date_runs = sorted(dates_map[date], key=lambda r: r["time"], reverse=True)
+            dates.append({"date": date, "runs": date_runs})
+        self._send_json(200, {"dates": dates})
 
     def _get_report(self, query):
         qs = urllib.parse.parse_qs(query)
