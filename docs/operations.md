@@ -84,6 +84,8 @@ cat > "$HOME/.config/contesttrade/environment" <<'EOF'
 HTTP_PROXY=http://proxy-host:port
 HTTPS_PROXY=http://proxy-host:port
 NO_PROXY=127.0.0.1,localhost
+# Web 外部监听时必填；不要写入仓库
+CONTESTTRADE_WEB_PASSWORD=replace-with-a-strong-password
 EOF
 chmod 600 "$HOME/.config/contesttrade/environment"
 ```

@@ -9,11 +9,16 @@ ContestTrade 报告查看器 - 零依赖单文件 Web 服务
          信号以卡片呈现，顶部信号矩阵条编码行业分布，结构即信息。
 """
 import http.server
+import hmac
+import html
 import json
 import os
 import re
+import secrets
+import threading
 import time
 import urllib.parse
+from http.cookies import SimpleCookie
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -22,8 +27,52 @@ HEALTH_FILE = ROOT.parent / "contest_trade" / "agents_workspace" / "runtime" / "
 HTML_FILE = ROOT / "index.html"
 HOST = os.environ.get("CONTESTTRADE_WEB_HOST", "127.0.0.1")
 PORT = int(os.environ.get("CONTESTTRADE_WEB_PORT", "8765"))
+WEB_PASSWORD = os.environ.get("CONTESTTRADE_WEB_PASSWORD", "")
+SESSION_TTL_SECONDS = int(os.environ.get("CONTESTTRADE_WEB_SESSION_TTL_SECONDS", "43200"))
+SESSION_COOKIE = "contesttrade_session"
+MAX_LOGIN_ATTEMPTS = 5
+LOGIN_WINDOW_SECONDS = 300
 
 HTML = HTML_FILE.read_text(encoding="utf-8") if HTML_FILE.is_file() else ""
+
+_sessions = {}
+_login_attempts = {}
+_auth_lock = threading.Lock()
+
+
+def _login_html(error=""):
+    error_html = f'<p class="error">{html.escape(error)}</p>' if error else ""
+    return f"""<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ContestTrade 登录</title><style>
+*{{box-sizing:border-box}} body{{margin:0;min-height:100vh;display:grid;place-items:center;background:#07101f;color:#e8edf5;font-family:system-ui,sans-serif}}
+main{{width:min(92vw,380px);padding:32px;border:1px solid #263651;border-radius:16px;background:#0d192b;box-shadow:0 24px 70px #0008}}
+h1{{margin:0 0 8px;color:#e0b35a;font-size:24px}} p{{color:#9dacbf}} label{{display:block;margin:24px 0 8px}}
+input{{width:100%;padding:12px;border:1px solid #354967;border-radius:8px;background:#081322;color:#fff;font-size:16px}}
+button{{width:100%;margin-top:16px;padding:12px;border:0;border-radius:8px;background:#d5a94f;color:#111;font-weight:700;cursor:pointer}}
+.error{{color:#ff8b8b}}
+</style></head><body><main><h1>ContestTrade</h1><p>请输入访问密码</p>{error_html}
+<form method="post" action="/login"><label for="password">密码</label><input id="password" name="password" type="password" required autofocus autocomplete="current-password"><button type="submit">登录</button></form>
+</main></body></html>"""
+
+
+def _new_session():
+    token = secrets.token_urlsafe(32)
+    with _auth_lock:
+        _sessions[token] = time.time() + SESSION_TTL_SECONDS
+    return token
+
+
+def _session_is_valid(token):
+    if not token:
+        return False
+    now = time.time()
+    with _auth_lock:
+        expiry = _sessions.get(token, 0)
+        if expiry <= now:
+            _sessions.pop(token, None)
+            return False
+        return True
 
 
 
@@ -223,6 +272,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
+        if path == "/login":
+            if self._is_authenticated():
+                self._redirect("/")
+            else:
+                self._send_html(_login_html())
+            return
+        if WEB_PASSWORD and not self._is_authenticated():
+            if path.startswith("/api/"):
+                self._send_json(401, {"error": "authentication required"})
+            else:
+                self._redirect("/login")
+            return
         if path in ("/", "/index.html"):
             self._send_html(HTML)
         elif path == "/api/reports":
@@ -233,6 +294,71 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._get_report(parsed.query)
         else:
             self._send_json(404, {"error": "not found"})
+
+    def do_POST(self):
+        path = urllib.parse.urlparse(self.path).path
+        if path == "/login":
+            self._login()
+        elif path == "/logout":
+            self._logout()
+        else:
+            self._send_json(404, {"error": "not found"})
+
+    def _is_authenticated(self):
+        if not WEB_PASSWORD:
+            return True
+        cookie = SimpleCookie(self.headers.get("Cookie", ""))
+        morsel = cookie.get(SESSION_COOKIE)
+        return _session_is_valid(morsel.value if morsel else "")
+
+    def _login(self):
+        if not WEB_PASSWORD:
+            self._redirect("/")
+            return
+        client = self.client_address[0]
+        now = time.time()
+        with _auth_lock:
+            attempts = [stamp for stamp in _login_attempts.get(client, []) if now - stamp < LOGIN_WINDOW_SECONDS]
+            _login_attempts[client] = attempts
+            limited = len(attempts) >= MAX_LOGIN_ATTEMPTS
+        if limited:
+            self._send_html(_login_html("尝试次数过多，请稍后再试"), 429)
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            length = 0
+        if length <= 0 or length > 4096:
+            self._send_html(_login_html("请求无效"), 400)
+            return
+        form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8", errors="replace"))
+        supplied = form.get("password", [""])[0]
+        if not hmac.compare_digest(supplied, WEB_PASSWORD):
+            with _auth_lock:
+                _login_attempts.setdefault(client, []).append(now)
+            self._send_html(_login_html("密码错误"), 401)
+            return
+        token = _new_session()
+        with _auth_lock:
+            _login_attempts.pop(client, None)
+        cookie = f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={SESSION_TTL_SECONDS}"
+        self._redirect("/", cookie)
+
+    def _logout(self):
+        cookie = SimpleCookie(self.headers.get("Cookie", ""))
+        morsel = cookie.get(SESSION_COOKIE)
+        if morsel:
+            with _auth_lock:
+                _sessions.pop(morsel.value, None)
+        self._redirect("/login", f"{SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0")
+
+    def _redirect(self, location, cookie=None):
+        self.send_response(303)
+        self.send_header("Location", location)
+        if cookie:
+            self.send_header("Set-Cookie", cookie)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def _get_health(self):
         try:
@@ -348,9 +474,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _send_html(self, html):
+    def _send_html(self, html, code=200):
         body = html.encode("utf-8")
-        self.send_response(200)
+        self.send_response(code)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -362,6 +488,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 def main():
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    if HOST not in ("127.0.0.1", "::1", "localhost") and not WEB_PASSWORD:
+        raise SystemExit("CONTESTTRADE_WEB_PASSWORD is required when listening on a non-loopback address")
     print(f"📊 ContestTrade 信号终端")
     display_host = "localhost" if HOST in ("127.0.0.1", "::1") else HOST
     print(f"   访问: http://{display_host}:{PORT}")
