@@ -53,7 +53,39 @@ launchctl print "gui/$(id -u)/com.contesttrade.daily"
 launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.contesttrade.daily.plist"
 ```
 
-## 3. Linux cron
+## 3. Linux systemd（推荐）
+
+用户级 systemd 服务支持 Web 常驻、失败重启和开机启动。先确认用户已开启 linger：
+
+```bash
+loginctl show-user "$USER" -p Linger
+# 如未开启，由管理员执行：sudo loginctl enable-linger "$USER"
+```
+
+安装服务（替换模板中的项目绝对路径）：
+
+```bash
+cd /absolute/path/to/ContestTrade
+mkdir -p "$HOME/.config/systemd/user"
+for unit in contesttrade-web.service contesttrade-run.service contesttrade-run.timer; do
+  sed "s|__PROJECT_DIR__|$PWD|g" "ops/systemd/$unit.example" \
+    > "$HOME/.config/systemd/user/$unit"
+done
+systemctl --user daemon-reload
+systemctl --user enable --now contesttrade-web.service contesttrade-run.timer
+```
+
+定时器在周一至周五 08:00（`Asia/Shanghai`）唤醒，运行脚本会再查询沪深交易日历，节假日正常跳过。`Persistent=true` 会在服务器错过触发时间后于下次启动时补跑。
+
+检查状态：
+
+```bash
+systemctl --user status contesttrade-web.service
+systemctl --user list-timers contesttrade-run.timer
+journalctl --user -u contesttrade-web.service -u contesttrade-run.service
+```
+
+## 4. Linux cron（备选）
 
 使用 `crontab -e` 增加以下一行，并替换绝对路径：
 
@@ -63,7 +95,9 @@ launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.contesttrade.da
 
 服务器时区应设为 `Asia/Shanghai`，或在 crontab 中显式设置 `CRON_TZ=Asia/Shanghai`。
 
-## 4. 运行语义
+cron 只负责工作日唤醒，`run_scheduled.sh` 会在非交易日退出且不调用模型。
+
+## 5. 运行语义
 
 - 退出码 `0`：成功或部分 Agent 失败但报告已生成（`degraded`）。
 - 退出码 `1`：配置错误、任务超时、全部关键 Agent 失败或报告生成失败。
@@ -78,7 +112,7 @@ launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.contesttrade.da
 - `contest_trade/agents_workspace/logs/scheduled_YYYY-MM-DD.log`：轮转日志。
 - `contest_trade/agents_workspace/results/`：Markdown 和 JSON 报告。
 
-## 5. 健康检查
+## 6. 健康检查
 
 ```bash
 uv run contesttrade doctor
@@ -99,7 +133,7 @@ curl --fail http://127.0.0.1:8765/api/health
 - `degraded`：部分 Agent 失败，但核心链路和报告完成。
 - `failed`：没有有效数据、全部研究 Agent 失败、超时或出现未处理错误。
 
-## 6. 日常维护
+## 7. 日常维护
 
 - 更新代码后执行 `uv sync --frozen` 和完整测试。
 - 定期检查 `doctor --strict`、日志中的外部接口错误和报告是否持续生成。

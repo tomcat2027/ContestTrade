@@ -1,0 +1,18 @@
+[Unit]
+Description=ContestTrade report website
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=__PROJECT_DIR__
+EnvironmentFile=-__PROJECT_DIR__/.env
+Environment=PYTHONUNBUFFERED=1
+Environment=CONTESTTRADE_WEB_HOST=0.0.0.0
+Environment=CONTESTTRADE_WEB_PORT=8765
+ExecStart=__PROJECT_DIR__/.venv/bin/python __PROJECT_DIR__/web/server.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

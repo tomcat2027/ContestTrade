@@ -1,0 +1,12 @@
+[Unit]
+Description=ContestTrade scheduled A-share analysis
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=__PROJECT_DIR__
+EnvironmentFile=-__PROJECT_DIR__/.env
+Environment=CONTEST_TRADE_RUN_TIMEOUT_SECONDS=1800
+ExecStart=__PROJECT_DIR__/scripts/run_scheduled.sh
+TimeoutStartSec=1900

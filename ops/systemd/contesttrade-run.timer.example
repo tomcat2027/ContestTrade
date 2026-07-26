@@ -1,0 +1,11 @@
+[Unit]
+Description=Run ContestTrade at 08:00 on mainland trading days
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 08:00:00 Asia/Shanghai
+Persistent=true
+AccuracySec=1min
+Unit=contesttrade-run.service
+
+[Install]
+WantedBy=timers.target
