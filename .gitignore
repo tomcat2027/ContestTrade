@@ -28,8 +28,9 @@ logs/
 data_cache/
 **/data_cache/
 *_cache/
-stock_summary_akshare_cache/
-akshare_cache/
+
+# Accidental local package-index/cache directories
+https:/
 
 # macOS
 .DS_Store

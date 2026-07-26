@@ -714,13 +714,15 @@ try:
         api_key=cfg.llm_thinking.get("api_key"),
         base_url=cfg.llm_thinking.get("base_url")
     )
-    assert GLOBAL_THINKING_LLM_CONFIG.api_key is not None
+    assert GLOBAL_THINKING_LLM_CONFIG.api_key
     GLOBAL_THINKING_LLM = LLMModel(GLOBAL_THINKING_LLM_CONFIG)
 except Exception as e:
     print(f"加载thinking模型失败，使用llm模型替代: {e}")
     GLOBAL_THINKING_LLM = GLOBAL_LLM
 
 try:
+    if not cfg.vlm.get("supports_vision", True):
+        raise ValueError("configured VLM does not support image input")
     vlm_provider = cfg.vlm.get("provider", detect_provider(cfg.vlm["model_name"], cfg.vlm.get("base_url")))
     GLOBAL_VLM_CONFIG = LLMModelConfig(
         provider=vlm_provider,
@@ -728,11 +730,8 @@ try:
         api_key=cfg.vlm.get("api_key"),
         base_url=cfg.vlm.get("base_url")
     )
-    assert GLOBAL_VLM_CONFIG.api_key is not None
+    assert GLOBAL_VLM_CONFIG.api_key
     GLOBAL_VISION_LLM = LLMModel(GLOBAL_VLM_CONFIG)
 except Exception as e:
     print(f"加载vlm模型失败，vision能力不可用: {e}")
     GLOBAL_VISION_LLM = None
-
-if __name__ == "__main__":
-    pass

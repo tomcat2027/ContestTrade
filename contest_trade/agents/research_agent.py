@@ -13,8 +13,7 @@ import time
 import traceback
 from loguru import logger
 from typing import List, Dict, Any, Optional, TypedDict
-from datetime import datetime
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from langgraph.graph import StateGraph, END
@@ -44,6 +43,7 @@ class ResearchAgentOutput:
     belief: str
     final_result: str  # 报告
     final_result_thinking: str  # 报告思考
+    parsed_signals: List[Dict] = field(default_factory=list)
 
     def to_dict(self):
         return {
@@ -52,7 +52,8 @@ class ResearchAgentOutput:
             "background_information": self.background_information,
             "belief": self.belief,
             "final_result": self.final_result,
-            "final_result_thinking": self.final_result_thinking
+            "final_result_thinking": self.final_result_thinking,
+            "parsed_signals": self.parsed_signals,
         }
 
 @dataclass
@@ -70,7 +71,15 @@ class ResearchAgentConfig:
         self.agent_name = agent_name
         self.belief = belief
         self.max_react_step = cfg.research_agent_config["max_react_step"]
-        self.tool_config = ToolManagerConfig(cfg.research_agent_config["tools"])
+        tool_paths = list(cfg.research_agent_config["tools"])
+        if not getattr(cfg, "serp_key", "") and not getattr(cfg, "bocha_key", ""):
+            search_tool = "tools.search_web.search_web"
+            if search_tool in tool_paths:
+                tool_paths.remove(search_tool)
+                logger.warning(
+                    "Search tool disabled because neither SERP_API_KEY nor BOCHA_API_KEY is configured"
+                )
+        self.tool_config = ToolManagerConfig(tool_paths)
         self.output_language = cfg.system_language
         if 'plan' in cfg.research_agent_config:
             self.plan = cfg.research_agent_config["plan"]
@@ -242,6 +251,12 @@ class ResearchAgent:
         except Exception as e:
             logger.error(f"Error in tool_selection: {e}")
             next_tool = {"error": str(e)}
+        if "error" in next_tool:
+            state["tool_call_context"] += json.dumps(
+                {"tool_selection_error": next_tool.get("error_msg", next_tool["error"])},
+                ensure_ascii=False,
+            ) + "\n"
+            next_tool = {"tool_name": "final_report", "properties": {}}
         state["selected_tool"] = next_tool
         step_elapsed = time.time() - step_start
         logger.info(f"[耗时] tool_selection 完成: {step_elapsed:.2f}秒, 选中工具: {next_tool.get('tool_name', 'unknown')}")
@@ -338,7 +353,8 @@ class ResearchAgent:
                 background_information=state["background_information"],
                 belief=state["belief"],
                 final_result=state["final_result"],
-                final_result_thinking=state["final_result_thinking"]
+                final_result_thinking=state["final_result_thinking"],
+                parsed_signals=state["parsed_signals"],
             )
         except Exception as e:
             logger.error(f"Error in write_report: {e}")
@@ -461,21 +477,3 @@ class ResearchAgent:
         logger.info(f"Research Agent Completed")
         return final_result
         
-
-if __name__ == "__main__":
-    # init instance
-    config = ResearchAgentConfig(
-        agent_name="research_agent_vtes11",
-    )
-    agent = ResearchAgent(config)
-
-    #task = input("请输入任务: ")
-    task = "新能源龙头股有哪些"
-    task = "贵州茅台的最近3天股价"
-    agent_input = ResearchAgentInput(
-        trigger_time="2025-07-09 09:00:00",
-        background_information="123123123"
-    )
-    agent_output = asyncio.run(agent.run_with_monitoring(agent_input))
-    print(agent_output.to_dict())
-

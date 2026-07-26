@@ -2,12 +2,8 @@
 Search Web Tools
 use bocha and serpapi to search web
 """
-import sys
-import os
-import asyncio
 import requests
 import textwrap
-from pathlib import Path
 from datetime import datetime, timedelta
 from pydantic import BaseModel, Field
 from langchain_core.tools import tool
@@ -16,8 +12,6 @@ import json
 from config.config import cfg
 from tools.tool_utils import smart_tool
 
-
-sys.path.append(str(Path(__file__).parent.parent.resolve()))
 
 def ask_bocha(payload: dict, BOCHA_API_KEY: str) -> list:
     """
@@ -95,7 +89,9 @@ def ask_google(payload: dict, SERP_API_KEY: str) -> list:
             params["tbs"] = f"cdr:1,cd_min:{start_formatted},cd_max:{end_formatted}"
 
         payload = json.dumps(params)
-        response = requests.request("POST", SERP_URL, headers=headers, data=payload)
+        response = requests.request(
+            "POST", SERP_URL, headers=headers, data=payload, timeout=10
+        )
         response.raise_for_status()
         data = response.json()
 
@@ -173,8 +169,9 @@ async def search_web(query: str, topk: int = 3, trigger_time: str = None):
     bocha_api_key = cfg.bocha_key
 
     if not serp_api_key and not bocha_api_key:
-        logger.warning("No search API keys (SERP_API_KEY, BOCHA_API_KEY) are configured.")
-        return ""
+        raise RuntimeError(
+            "No search API keys are configured; set SERP_API_KEY or BOCHA_API_KEY"
+        )
 
     # Priority 1: Try Google Search
     if serp_api_key:
@@ -193,7 +190,3 @@ async def search_web(query: str, topk: int = 3, trigger_time: str = None):
         
     logger.info(f"Search successful. Returning {len(response)} results.")
     return build_search_result_context(response)
-
-if __name__ == "__main__":
-    result = asyncio.run(search_web.ainvoke({"query": "最近电影", "topk": 3, "trigger_time": "2025-01-09 15:00:00"}))
-    print(result)

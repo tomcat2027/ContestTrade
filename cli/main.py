@@ -1,11 +1,11 @@
 """
-ContestTrade: 基于内部竞赛机制的Multi-Agent交易系统
+ContestTrade: A 股 Multi-Agent 研究与信号聚合系统
 """
 import asyncio
 import sys
 import json
-import re
 import os
+from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
 from typing import Optional, Dict
 from datetime import datetime
@@ -21,20 +21,47 @@ from rich.align import Align
 from rich import box
 
 from .utils import get_trigger_time, validate_required_services
-from .static.report_template import display_final_report_interactive
 from .utils import get_trigger_time_for_market, get_market_selection
 
 console = Console()
 
 def get_text(cn_text: str, en_text: str) -> str:
-    """根据市场类型返回对应语言的文本"""
-    return cn_text
+    """根据系统语言返回文本。"""
+    language = os.environ.get("CONTEST_TRADE_LANGUAGE", "")
+    if not language:
+        try:
+            from contest_trade.config.config import cfg
+            language = str(getattr(cfg, "system_language", "中文"))
+        except Exception:
+            language = "中文"
+    return en_text if language.lower() in {"en", "english", "英文", "英语"} else cn_text
 
 app = typer.Typer(
     name="contesttrade",
-    help="ContestTrade: 基于内部竞赛机制的 A 股 Multi-Agent 交易系统",
+    help="ContestTrade: A 股 Multi-Agent 研究与信号聚合系统",
     add_completion=True,
 )
+
+
+def generate_analysis_reports(final_state: Dict, trigger_time: str) -> Dict[str, Path]:
+    """Generate every persisted report through one shared CLI path."""
+    from contest_trade.config.config import PROJECT_ROOT
+    from .static.report_template import (
+        generate_data_report,
+        generate_final_report,
+        generate_final_report_json,
+    )
+
+    results_dir = Path(PROJECT_ROOT) / "agents_workspace" / "results"
+    _, markdown_path = generate_final_report(final_state, results_dir)
+    json_path = generate_final_report_json(final_state, results_dir)
+    paths = {"research_markdown": markdown_path, "research_json": json_path}
+
+    factors_data = load_factors_data(trigger_time)
+    if factors_data and factors_data.get("agents"):
+        _, data_path = generate_data_report(factors_data, results_dir)
+        paths["data_markdown"] = data_path
+    return paths
 
 def _get_agent_config():
     """从配置文件动态获取代理配置"""
@@ -224,11 +251,11 @@ class ContestTradeDisplay:
             with open(welcome_text, "r", encoding="utf-8") as f:
                 welcome = f.read()
         else:
-            welcome = get_text("ContestTrade: 基于内部竞赛机制的Multi-Agent交易系统", "ContestTrade: Multi-Agent Trading System Based on Internal Contest Mechanism")
+            welcome = get_text("ContestTrade: A 股 Multi-Agent 研究与信号聚合系统", "ContestTrade: A-share Multi-Agent Research and Signal Aggregation System")
         
         header_panel = Panel(
             Align.center(welcome),
-            title=get_text("🎯 ContestTrade - 基于内部竞赛机制的Multi-Agent交易系统", "🎯 ContestTrade - Multi-Agent Trading System Based on Internal Contest Mechanism"),
+            title=get_text("🎯 ContestTrade - A 股 Multi-Agent 研究与信号聚合系统", "🎯 ContestTrade - A-share Multi-Agent Research and Signal Aggregation System"),
             border_style="blue",
             padding=(0, 1),
             expand=True  # 自适应宽度
@@ -409,9 +436,6 @@ def run_contest_analysis_interactive(trigger_time: str, market: str):
             # 检查模块导入 - Import when needed
             try:
                 from contest_trade.main import SimpleTradeCompany
-                if SimpleTradeCompany is None:
-                    raise ImportError("SimpleTradeCompany模块导入失败")
-                    
                 display.add_message(get_text("系统", "System"), get_text("✅ 成功导入SimpleTradeCompany模块", "✅ Successfully imported SimpleTradeCompany module"))
                 display.update_display(layout, trigger_time)
                 
@@ -436,49 +460,23 @@ def run_contest_analysis_interactive(trigger_time: str, market: str):
                 display.final_state = final_state
                 display.update_display(layout, trigger_time)
                 
-                # 自动生成MD报告
                 try:
-                    from contest_trade.config.config import PROJECT_ROOT
-                    results_dir = Path(PROJECT_ROOT) / "agents_workspace" / "results"
-                    from .static.report_template import generate_final_report, generate_data_report
-                    
-                    # 生成研究报告
-                    markdown_content, report_path = generate_final_report(final_state, results_dir)
-                    display.add_message(get_text("报告", "Report"), get_text(f"✅ 研究报告已生成: {report_path.name}", f"✅ Research report generated: {report_path.name}"))
-
-                    # 同时写一份 JSON 报告供 web 直接读取（绕过 markdown 正则解析）
-                    try:
-                        from .static.report_template import generate_final_report_json
-                        json_path = generate_final_report_json(final_state, results_dir)
-                        display.add_message(get_text("报告", "Report"), get_text(f"✅ JSON 报告: {json_path.name}", f"✅ JSON report: {json_path.name}"))
-                    except Exception as json_err:
-                        display.add_message("警告", f"⚠️ JSON 报告生成失败（web 会回退到 markdown）: {json_err}")
-
-                    # 生成数据报告
-                    factors_data = load_factors_data(trigger_time)
-                    if factors_data and factors_data.get('agents'):
-                        data_markdown_content, data_report_path = generate_data_report(factors_data, results_dir)
-                        display.add_message(get_text("报告", "Report"), get_text(f"✅ 数据报告已生成: {data_report_path.name}", f"✅ Data report generated: {data_report_path.name}"))
-                    else:
-                        display.add_message(get_text("报告", "Report"), get_text(f"⚠️ 未找到数据源，跳过数据报告生成", f"⚠️ No data sources found, skipping data report generation"))
-                    
+                    report_paths = generate_analysis_reports(final_state, trigger_time)
+                    for report_type, report_path in report_paths.items():
+                        display.add_message("报告", f"✅ {report_type}: {report_path.name}")
                     display.update_display(layout, trigger_time)
                 except Exception as e:
-                    display.add_message("报告", f"⚠️ MD报告生成失败: {str(e)}")
+                    display.add_message("报告", f"❌ 报告生成失败: {str(e)}")
                     display.update_display(layout, trigger_time)
+                    return None, display
                 
-                # 等待用户手动退出
                 console.print(get_text("\n[green]✅ 分析完成！[/green]", "\n[green]✅ Analysis completed![/green]"))
-                console.print(get_text("[dim]按任意键退出运行界面...[/dim]", "[dim]Press any key to exit the interface...[/dim]"))
-                input()
                 
             else:
                 display.add_message("错误", "❌ 分析失败")
                 display.set_current_task("分析失败")
                 display.update_display(layout, trigger_time)
                 console.print("\n[red]❌ 分析失败！[/red]")
-                console.print("[dim]按任意键退出运行界面...[/dim]")
-                input()
                 return None, display
                 
     except Exception as e:
@@ -712,40 +710,7 @@ def display_data_report(final_state: Dict):
             return
         
         generator = DataReportGenerator(factors_data)
-        
-        # 生成报告内容
-        total_agents = len(factors_data.get('agents', {}))
-        
-        markdown_content = f"""# ContestTrade {get_text('数据分析报告', 'Data Analysis Report')}
-
-## 📊 {get_text('数据摘要', 'Data Summary')}
-
-**{get_text('分析时间', 'Analysis Time')}**: {trigger_time}  
-**{get_text('分析状态', 'Analysis Status')}**: ✅ {get_text('完成', 'Completed')}  
-**{get_text('数据代理数量', 'Data Agent Count')}**: {total_agents}  
-
----
-
-## 🔍 {get_text('数据源分析详情', 'Data Source Analysis Details')}
-
-"""
-        
-        # 遍历每个代理的数据
-        for agent_name, agent_data in factors_data.get('agents', {}).items():
-            markdown_content += f"### 📈 {agent_name.replace('_', ' ').title()}\n\n"
-            
-            # 只获取context_string字段
-            context_string = agent_data.get('context_string', '')
-            
-            if context_string:
-                # 清洗掉 [Batch X] 标记
-                cleaned_context = re.sub(r'\[Batch \d+\]', '', context_string).strip()
-                markdown_content += f"{cleaned_context}\n\n"
-            else:
-                markdown_content += f"**{get_text('暂无分析内容', 'No analysis content available')}**\n\n"
-            
-            markdown_content += "---\n\n"
-        
+        markdown_content = generator.build_markdown_report()
         generator.display_terminal_interactive_report(markdown_content)
         
     except Exception as e:
@@ -816,84 +781,7 @@ def display_detailed_report(final_state: Dict):
     try:
         from .static.report_template import FinalReportGenerator
         generator = FinalReportGenerator(final_state)
-        step_results = final_state.get('step_results', {})
-        data_team_results = step_results.get('data_team', {})
-        research_team_results = step_results.get('research_team', {})
-        contest_results = step_results.get('contest', {})
-        
-        trigger_time = final_state.get('trigger_time', 'N/A')
-        data_factors_count = data_team_results.get('factors_count', 0)
-        research_signals_count = research_team_results.get('signals_count', 0)
-        best_signals = contest_results.get('best_signals', [])
-        
-        valid_signals = [s for s in best_signals if s.get('has_opportunity', 'no') == 'yes']
-        invalid_signals = [s for s in best_signals if s.get('has_opportunity', 'no') != 'yes']
-        
-        signal_rate = f"{len(valid_signals)/len(best_signals)*100:.1f}% ({len(valid_signals)}/{len(best_signals)})" if len(best_signals) > 0 else "0% (0/0)"
-        
-        markdown_content = f"""# ContestTrade {get_text('详细分析报告', 'Detailed Analysis Report')}
-
-## 📊 {get_text('执行摘要', 'Executive Summary')}
-
-**{get_text('分析时间', 'Analysis Time')}**: {trigger_time}  
-**{get_text('数据源数量', 'Data Sources Count')}**: {data_factors_count}  
-**{get_text('研究信号数量', 'Research Signals Count')}**: {research_signals_count}  
-**{get_text('有效投资信号', 'Valid Investment Signals')}**: {len(valid_signals)}  
-**{get_text('信号有效率', 'Signal Effectiveness Rate')}**: {signal_rate}
-
----
-
-## 🎯 {get_text('投资信号详情', 'Investment Signals Details')}
-"""
-        
-        if valid_signals:
-            markdown_content += f"\n### ✅ {get_text('推荐投资信号', 'Recommended Investment Signals')} ({len(valid_signals)}{get_text('个', '')})\n\n"
-            
-            for i, signal in enumerate(valid_signals, 1):
-                symbol_name = signal.get('symbol_name', 'N/A')
-                symbol_code = signal.get('symbol_code', 'N/A')
-                action = signal.get('action', 'N/A')
-                probability = signal.get('probability', 'N/A')
-                agent_id = signal.get('agent_id', 'N/A')
-                
-                markdown_content += f"#### {i}. {symbol_name} ({symbol_code})\n\n"
-                markdown_content += f"- **{get_text('投资动作', 'Investment Action')}**: {action}\n"
-                markdown_content += f"- **{get_text('分析来源', 'Analysis Source')}**: Research Agent {agent_id}\n\n"
-                
-                evidence_list = signal.get('evidence_list', [])
-                if evidence_list:
-                    markdown_content += f"**📋 {get_text('支撑证据', 'Supporting Evidence')} ({len(evidence_list)}{get_text('项', '')}):**\n\n"
-                    for j, evidence in enumerate(evidence_list, 1):
-                        desc = evidence.get('description', 'N/A')
-                        source = evidence.get('from_source', 'N/A')
-                        time = evidence.get('time', 'N/A')
-                        markdown_content += f"{j}. **{desc}**\n"
-                        markdown_content += f"   - {get_text('时间', 'Time')}: {time}\n"
-                        markdown_content += f"   - {get_text('来源', 'Source')}: {source}\n\n"
-                
-                # 风险提示
-                limitations = signal.get('limitations', [])
-                if limitations:
-                    markdown_content += f"**⚠️ {get_text('潜在风险', 'Potential Risks')}:**\n\n"
-                    for limitation in limitations:
-                        markdown_content += f"- {limitation}\n"
-                    markdown_content += "\n"
-                
-                markdown_content += "---\n"
-        else:
-            markdown_content += f"\n### ❌ {get_text('暂无推荐投资信号', 'No Recommended Investment Signals')}\n\n"
-            markdown_content += get_text("本次分析未发现具有明确投资机会的信号。\n\n", "No signals with clear investment opportunities were found in this analysis.\n\n")
-        
-        # 无效信号统计
-        if invalid_signals:
-            markdown_content += f"### ⚠️ {get_text('排除信号', 'Excluded Signals')} ({len(invalid_signals)}{get_text('个', '')})\n"
-            markdown_content += get_text("以下信号经分析后认为不具备投资机会：\n\n", "The following signals were analyzed and deemed not to have investment opportunities:\n\n")
-            
-            for i, signal in enumerate(invalid_signals, 1):
-                agent_id = signal.get('agent_id', 'N/A')
-                markdown_content += f"{i}. Research Agent {agent_id} - {get_text('无明确投资机会', 'No clear investment opportunity')}\n"
-            
-            markdown_content += "\n"
+        markdown_content = generator.build_markdown_report()
         generator.display_terminal_interactive_report(markdown_content)
         
     except Exception as e:
@@ -949,6 +837,14 @@ def run(
     console.print(f"[green]已选择市场: {market}[/green]")
     console.print(f"[green]触发时间: {trigger_time}[/green]")
 
+    from contest_trade.config.config import cfg
+    config_errors = cfg.runtime_config_errors()
+    if config_errors:
+        console.print("[red]运行配置不完整：[/red]")
+        for error in config_errors:
+            console.print(f"[red]- {error}[/red]")
+        raise typer.Exit(1)
+
     # 静默模式下跳过服务验证
     if not silent:
         # 验证必需的服务连接
@@ -965,39 +861,20 @@ def run(
             if final_state:
                 console.print("[green]✅ 分析完成[/green]")
 
-                # 静默模式下也生成 Markdown 报告
                 try:
-                    from contest_trade.config.config import PROJECT_ROOT
-                    results_dir = Path(PROJECT_ROOT) / "agents_workspace" / "results"
-                    from .static.report_template import generate_final_report, generate_data_report
-
-                    # 生成研究报告
-                    markdown_content, report_path = generate_final_report(final_state, results_dir)
-                    console.print(f"[green]📄 研究报告已生成: {report_path}[/green]")
-
-                    # 同时写 JSON 报告供 web 读取
-                    try:
-                        from .static.report_template import generate_final_report_json
-                        json_path = generate_final_report_json(final_state, results_dir)
-                        console.print(f"[green]📄 JSON 报告: {json_path}[/green]")
-                    except Exception as json_err:
-                        console.print(f"[yellow]⚠️ JSON 报告生成失败: {json_err}[/yellow]")
-
-                    # 生成数据报告
-                    factors_data = load_factors_data(trigger_time)
-                    if factors_data and factors_data.get('agents'):
-                        data_markdown_content, data_report_path = generate_data_report(factors_data, results_dir)
-                        console.print(f"[green]📄 数据报告已生成: {data_report_path}[/green]")
-                    else:
-                        console.print("[yellow]⚠️ 未找到数据源，跳过数据报告[/yellow]")
+                    report_paths = generate_analysis_reports(final_state, trigger_time)
+                    for report_type, report_path in report_paths.items():
+                        console.print(f"[green]📄 {report_type}: {report_path}[/green]")
 
                 except Exception as report_err:
-                    console.print(f"[yellow]⚠️ 报告生成失败: {report_err}[/yellow]")
+                    console.print(f"[red]❌ 报告生成失败: {report_err}[/red]")
+                    raise typer.Exit(1)
 
             else:
                 console.print("[red]❌ 分析失败[/red]")
         except Exception as e:
             console.print(f"[red]运行分析时发生错误: {e}[/red]")
+            raise typer.Exit(1)
         return
 
     # 主循环
@@ -1057,6 +934,9 @@ def config():
         console.print(f"\n[bold]LLM配置:[/bold]")
         console.print(f"  模型: {cfg.llm.get('model_name', 'N/A')}")
         console.print(f"  基础URL: {cfg.llm.get('base_url', 'N/A')}")
+        key_env = cfg.llm.get('api_key_env', 'N/A')
+        key_status = '已配置' if cfg.llm.get('api_key') else '未配置'
+        console.print(f"  密钥环境变量: {key_env} ({key_status})")
         
         # Data Analysis Agent配置
         console.print(f"\n[bold]Data Analysis Agent配置:[/bold]")
@@ -1078,9 +958,13 @@ def config():
 def version():
     """显示版本信息"""
     console.print("[bold blue]ContestTrade[/bold blue]")
-    console.print("基于内部竞赛机制的Multi-Agent交易系统")
-    console.print("Multi-Agent Trading System Based on Internal Contest Mechanism")
-    console.print(f"版本: 1.1")
+    console.print("A 股 Multi-Agent 研究与信号聚合系统")
+    console.print("A-share Multi-Agent Research and Signal Aggregation System")
+    try:
+        current_version = package_version("ContestTrade")
+    except PackageNotFoundError:
+        current_version = "1.1.0"
+    console.print(f"版本: {current_version}")
 
 if __name__ == "__main__":
     app()

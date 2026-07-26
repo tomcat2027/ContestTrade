@@ -1,7 +1,6 @@
 """
 Data Summary Based On Akshare
 """
-import asyncio
 import hashlib
 from pathlib import Path
 from pydantic import BaseModel, Field
@@ -269,13 +268,3 @@ async def stock_summary(market: str, symbol: str, trigger_time: str) -> str:
         result = await analyze_stock_basic_info(market, symbol, stock_name, trigger_time)
         cache_file.write_text(result)
         return result
-
-
-if __name__ == "__main__":
-    
-    result = asyncio.run(stock_summary.ainvoke(
-        { "market": "CN-Stock", 
-         "symbol": "600519.SH", 
-         "trigger_time": "2025-07-09 15:00:00"}))
-         
-    print(result)

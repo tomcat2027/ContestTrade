@@ -30,8 +30,3 @@ def get_previous_trading_date(trigger_time: str, output_format: str = "%Y%m%d") 
     previous_trading_datetime = previous_trading_date[:4] + "-" + previous_trading_date[4:6] + "-" + previous_trading_date[6:] + " " + trigger_time.split(" ")[1]
     previous_trading_date_formatted = datetime.strptime(previous_trading_datetime, "%Y-%m-%d %H:%M:%S").strftime(output_format)
     return previous_trading_date_formatted
-
-
-if __name__ == "__main__":
-    print(get_current_datetime("2025-01-01 10:00:00"))
-    print(get_previous_trading_date("2025-01-01 10:00:00"))

@@ -19,7 +19,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 RESULTS_DIR = ROOT.parent / "contest_trade" / "agents_workspace" / "results"
 HTML_FILE = ROOT / "index.html"
-PORT = 8765
+HOST = os.environ.get("CONTESTTRADE_WEB_HOST", "127.0.0.1")
+PORT = int(os.environ.get("CONTESTTRADE_WEB_PORT", "8765"))
 
 HTML = HTML_FILE.read_text(encoding="utf-8") if HTML_FILE.is_file() else ""
 
@@ -207,6 +208,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
     _reports_cache = None  # {"mtime": float, "data": {"dates": [...]}}
     _reports_cache_time = 0.0
 
+    def end_headers(self):
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src https://fonts.gstatic.com; img-src 'self' data:; "
+            "connect-src 'self'; frame-ancestors 'none'",
+        )
+        super().end_headers()
+
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
@@ -318,21 +333,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def log_message(self, *args):
-        pass
+    def log_message(self, format, *args):
+        print(f"[web] {self.address_string()} - {format % args}")
 
 
 def main():
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     print(f"📊 ContestTrade 信号终端")
-    print(f"   访问: http://localhost:{PORT}")
+    display_host = "localhost" if HOST in ("127.0.0.1", "::1") else HOST
+    print(f"   访问: http://{display_host}:{PORT}")
     print(f"   报告目录: {RESULTS_DIR}")
     print(f"   Ctrl+C 停止")
-    server = http.server.HTTPServer(("0.0.0.0", PORT), Handler)
+    if HOST not in ("127.0.0.1", "::1", "localhost"):
+        print("⚠️  已显式开启外部监听；请在反向代理层配置 TLS 和访问控制")
+    server = http.server.ThreadingHTTPServer((HOST, PORT), Handler)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\n已停止")
+    finally:
+        server.server_close()
 
 
 if __name__ == "__main__":

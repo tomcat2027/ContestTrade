@@ -1,8 +1,6 @@
 """
 Corporate Info Tools (Akshare Version)
 """
-import asyncio
-import asyncio
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 from utils.akshare_utils import akshare_cached
@@ -316,13 +314,3 @@ async def company_dividend(market: str, symbol: str, period: str, trigger_time: 
             return {"error": "The period is not in the trigger time."}
     else:
         return {"error": "Market not supported for Akshare."}
-
-
-if __name__ == "__main__":
-    result = asyncio.run(company_financial_info.ainvoke({
-        "market": "CN-Stock", 
-        "symbol": "600519.SH", 
-        "task": "最近财报", 
-        "trigger_time": "2025-08-20 15:00:00"
-    }))
-    print(result)

@@ -37,11 +37,15 @@ class ToolManager:
         
     def _register_from_configs(self, tool_paths: List):
         """Register tools from config list"""
+        failures = []
         for tool_path in tool_paths:
             try:
                 self.register_from_module_path(tool_path)
             except Exception as e:
                 logger.error(f"Failed to register tool from config {tool_path}: {e}")
+                failures.append(f"{tool_path}: {e}")
+        if failures:
+            raise ValueError("Failed to register configured tools: " + "; ".join(failures))
     
     def register(self, tool_name: str, tool_function: Callable):
         """Register tool"""
@@ -141,9 +145,8 @@ class ToolManager:
             else:
                 return tool_func(**kwargs)
         except Exception as e:
-            import traceback
-            traceback.print_exc()
-            return {"error": "Call tool Failed", "error_msg": str(e)}
+            logger.exception(f"Tool {tool_name} failed")
+            return {"success": False, "error_message": str(e)}
 
     def parse_bounding_json(response: str) -> dict:
         """ parse tool call from llm response """
@@ -323,25 +326,4 @@ class PrintHelloInput(BaseModel):
 )
 async def print_string(input_string: str):
     return input_string
-
-
-if __name__ == "__main__":
-    """Demo multiple tool registration methods"""
-
-    config = ToolManagerConfig(tool_paths=["tools.tool_utils.print_string"])
-    registry = ToolManager(config)
-
-    registry.register_function(print_string)
-
-    registry.register_from_module_path("tools.tool_utils.print_string")
-
-    # get tools description
-    print(registry.build_toolcall_context())
-
-    # list all tools
-    print(registry.get_all_tools())
-
-    # call tool
-    result = asyncio.run(registry.call_tool("print_string", {"input_string": "Hello World!"}))
-    print(result)
 

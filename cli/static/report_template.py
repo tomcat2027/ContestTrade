@@ -6,19 +6,12 @@ import os
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import Dict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]  # cli/static → cli → 项目根
-from pathlib import Path
-from typing import Dict, List
 from rich.console import Console
 from rich.panel import Panel
-from rich.text import Text
-from rich.table import Table
 from rich.markdown import Markdown
-from rich.layout import Layout
-from rich.live import Live
-from rich.align import Align
-from rich import box
 import re
 
 class DataReportGenerator:
@@ -32,8 +25,8 @@ class DataReportGenerator:
     def get_text(self, cn_text: str, en_text: str) -> str:
         return cn_text
         
-    def generate_markdown_report(self, save_path: Path) -> str:
-        """生成数据报告的Markdown格式"""
+    def build_markdown_report(self) -> str:
+        """构建数据报告的 Markdown 内容，不写入文件。"""
         
         # 获取触发时间
         trigger_time = self.factors_data.get('trigger_time', 'N/A')
@@ -77,10 +70,12 @@ class DataReportGenerator:
         report_content += f"**{self.get_text('报告生成时间', 'Report Generation Time')}**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
         report_content += f"**{self.get_text('系统版本', 'System Version')}**: ContestTrade v1.1.0\n"
         
-        # 保存到文件
-        with open(save_path, 'w', encoding='utf-8') as f:
-            f.write(report_content)
-        
+        return report_content
+
+    def generate_markdown_report(self, save_path: Path) -> str:
+        """生成数据报告并写入文件。"""
+        report_content = self.build_markdown_report()
+        save_path.write_text(report_content, encoding="utf-8")
         return report_content
     
     def display_terminal_interactive_report(self, markdown_content: str):
@@ -116,43 +111,6 @@ class DataReportGenerator:
         except KeyboardInterrupt:
             pass
     
-    def display_interactive_report(self, markdown_content: str, save_path: Path):
-        """显示可滚动的交互式数据报告"""
-        
-        # 创建Rich控制台，启用可滚动功能
-        console = Console()
-        
-        # 创建Markdown对象
-        markdown = Markdown(markdown_content)
-        
-        report_panel = Panel(
-            markdown,
-            title="📋 ContestTrade Data Report",
-            title_align="center",
-            border_style="blue",
-            padding=(1, 2),
-        )
-        
-        # 清屏并显示报告
-        console.clear()
-        console.print(report_panel)
-        
-        # 显示文件保存信息和操作提示
-        console.print(f"\n[green]✅ {self.get_text('数据报告已保存至', 'Data report saved to')}:[/green]")
-        console.print(f"[blue]📄 {save_path}[/blue]")
-        console.print(f"[dim]{self.get_text('您可以使用文本编辑器打开查看完整报告', 'You can open it with a text editor to view the full report')}[/dim]")
-        
-        # 操作提示
-        console.print(f"\n[yellow]📖 {self.get_text('报告操作说明', 'Report Operation Instructions')}:[/yellow]")
-        console.print(f"[dim]• {self.get_text('向上滚动查看报告开头', 'Scroll up to view the beginning of the report')}[/dim]")
-        console.print(f"[dim]• {self.get_text('向下滚动查看更多内容', 'Scroll down to view more content')}[/dim]") 
-        console.print(f"[dim]• {self.get_text('按任意键返回主菜单', 'Press any key to return to main menu')}[/dim]")
-        
-        try:
-            input()
-        except KeyboardInterrupt:
-            pass
-
 
 class FinalReportGenerator:
     """最终报告生成器"""
@@ -165,14 +123,15 @@ class FinalReportGenerator:
     def get_text(self, cn_text: str, en_text: str) -> str:
         return cn_text
         
-    def generate_markdown_report(self, save_path: Path) -> str:
-        """生成Markdown格式的报告"""
+    def build_markdown_report(self) -> str:
+        """构建最终报告的 Markdown 内容，不写入文件。"""
         
         # 获取基本信息
         step_results = self.final_state.get('step_results', {})
         data_team_results = step_results.get('data_team', {})
         research_team_results = step_results.get('research_team', {})
         contest_results = step_results.get('contest', {})
+        aggregation_stats = contest_results.get('aggregation_stats', {})
         
         # 获取触发时间，确保正确解析
         trigger_time = self.final_state.get('trigger_time', 'N/A')
@@ -182,14 +141,14 @@ class FinalReportGenerator:
         
         data_factors_count = data_team_results.get('factors_count', 0)
         research_signals_count = research_team_results.get('signals_count', 0)
+        data_failed_count = data_team_results.get('failed_count', 0)
+        research_failed_count = research_team_results.get('failed_count', 0)
         best_signals = contest_results.get('best_signals', [])
         
         # 筛选有效信号
         valid_signals = [s for s in best_signals if s.get('has_opportunity', 'no') == 'yes']
-        invalid_signals = [s for s in best_signals if s.get('has_opportunity', 'no') != 'yes']
-        
-        # 生成报告内容
-        signal_rate = f"{len(valid_signals)/len(best_signals)*100:.1f}% ({len(valid_signals)}/{len(best_signals)})" if len(best_signals) > 0 else "0% (0/0)"
+        input_signal_count = aggregation_stats.get('input_count', research_signals_count)
+        signal_rate = f"{len(valid_signals)/input_signal_count*100:.1f}% ({len(valid_signals)}/{input_signal_count})" if input_signal_count > 0 else "0% (0/0)"
         
         report_content = f"""# ContestTrade {self.get_text('最终分析报告', 'Final Analysis Report')}
 
@@ -201,6 +160,12 @@ class FinalReportGenerator:
 **{self.get_text('研究信号数量', 'Research Signals Count')}**: {research_signals_count}  
 **{self.get_text('有效投资信号', 'Valid Investment Signals')}**: {len(valid_signals)}  
 **{self.get_text('信号有效率', 'Signal Effectiveness Rate')}**: {signal_rate}
+**{self.get_text('数据 Agent 失败数', 'Failed Data Agents')}**: {data_failed_count}
+**{self.get_text('研究 Agent 失败数', 'Failed Research Agents')}**: {research_failed_count}
+
+- **聚合去重数量**: {aggregation_stats.get('duplicate_count', 0)}
+- **校验拒绝数量**: {aggregation_stats.get('rejected_count', 0)}
+- **阈值/冲突过滤数量**: {aggregation_stats.get('filtered_count', 0)}
 
 ---
 
@@ -215,11 +180,14 @@ class FinalReportGenerator:
                 symbol_name = signal.get('symbol_name', 'N/A')
                 symbol_code = signal.get('symbol_code', 'N/A')
                 action = signal.get('action', 'N/A')
-                agent_id = signal.get('agent_id', 'N/A')
+                source_agents = signal.get('source_agents', [])
                 
                 report_content += f"#### {i}. {symbol_name} ({symbol_code})\n\n"
                 report_content += f"- **{self.get_text('投资动作', 'Investment Action')}**: {action}\n"
-                report_content += f"- **{self.get_text('分析来源', 'Analysis Source')}**: Research Agent {agent_id}\n"
+                report_content += f"- **聚合评分**: {signal.get('aggregate_score', 'N/A')}\n"
+                report_content += f"- **动作一致度**: {signal.get('action_consensus', 'N/A')}\n"
+                report_content += f"- **平均概率**: {signal.get('probability', 'N/A')}%\n"
+                report_content += f"- **{self.get_text('分析来源', 'Analysis Source')}**: {', '.join(source_agents) if source_agents else 'N/A'}\n"
                 
                 # 证据详情
                 evidence_list = signal.get('evidence_list', [])
@@ -243,27 +211,26 @@ class FinalReportGenerator:
             report_content += f"### ❌ {self.get_text('暂无推荐投资信号', 'No Recommended Investment Signals')}\n\n"
             report_content += self.get_text("本次分析未发现具有明确投资机会的信号。\n\n", "No signals with clear investment opportunities were found in this analysis.\n\n")
         
-        # 无效信号统计
-        if invalid_signals:
-            report_content += f"### ⚠️ {self.get_text('排除信号', 'Excluded Signals')} ({len(invalid_signals)}{self.get_text('个', '')})\n\n"
-            report_content += self.get_text("以下信号经分析后认为不具备投资机会：\n\n", "The following signals were analyzed and deemed not to have investment opportunities:\n\n")
-            
-            for i, signal in enumerate(invalid_signals, 1):
-                agent_id = signal.get('agent_id', 'N/A')
-                report_content += f"{i}. Research Agent {agent_id} - {self.get_text('无明确投资机会', 'No clear investment opportunity')}\n"
-            
+        excluded_signals = contest_results.get('rejected_signals', []) + contest_results.get('filtered_signals', [])
+        if excluded_signals:
+            report_content += f"### ⚠️ 聚合器排除信号 ({len(excluded_signals)}个)\n\n"
+            for i, signal in enumerate(excluded_signals, 1):
+                code = signal.get('symbol_code') or f"输入 #{signal.get('index', 'N/A')}"
+                report_content += f"{i}. {code} - {signal.get('reason', 'unknown')}\n"
             report_content += "\n"
         
         # 免责声明
         report_content += "---\n\n## ⚠️ {self.get_text('免责声明', 'Disclaimer')}\n\n"
         report_content += self.get_text("本报告由ContestTrade AI系统生成，仅供参考，不构成投资建议。投资有风险，决策需谨慎。\n\n", "This report is generated by the ContestTrade AI system and is for reference only. It does not constitute investment advice. Investing involves risks, and decisions should be made carefully.\n\n")
         report_content += f"**{self.get_text('报告生成时间', 'Report Generation Time')}**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-        report_content += f"**{self.get_text('系统版本', 'System Version')}**: ContestTrade v1.0.0\n"
+        report_content += f"**{self.get_text('系统版本', 'System Version')}**: ContestTrade v1.1.0\n"
         
-        # 保存到文件
-        with open(save_path, 'w', encoding='utf-8') as f:
-            f.write(report_content)
-        
+        return report_content
+
+    def generate_markdown_report(self, save_path: Path) -> str:
+        """生成最终报告并写入文件。"""
+        report_content = self.build_markdown_report()
+        save_path.write_text(report_content, encoding="utf-8")
         return report_content
     
     def display_terminal_interactive_report(self, markdown_content: str):
@@ -299,77 +266,6 @@ class FinalReportGenerator:
         except KeyboardInterrupt:
             pass
     
-    def display_interactive_report(self, markdown_content: str, save_path: Path):
-        """显示可滚动的交互式报告"""
-        
-        # 创建Rich控制台，启用可滚动功能
-        console = Console()
-        
-        # 创建Markdown对象
-        markdown = Markdown(markdown_content)
-        
-        report_panel = Panel(
-            markdown,
-            title="📋 ContestTrade Final Report",
-            title_align="center",
-            border_style="blue",
-            padding=(1, 2),
-        )
-        
-        # 清屏并显示报告
-        console.clear()
-        console.print(report_panel)
-        
-        # 显示文件保存信息和操作提示
-        console.print(f"\n[green]✅ {self.get_text('报告已保存至', 'Report saved to')}:[/green]")
-        console.print(f"[blue]📄 {save_path}[/blue]")
-        console.print(f"[dim]{self.get_text('您可以使用文本编辑器打开查看完整报告', 'You can open it with a text editor to view the full report')}[/dim]")
-        
-        # 操作提示
-        console.print(f"\n[yellow]📖 {self.get_text('报告操作说明', 'Report Operation Instructions')}:[/yellow]")
-        console.print(f"[dim]• {self.get_text('向上滚动查看报告开头', 'Scroll up to view the beginning of the report')}[/dim]")
-        console.print(f"[dim]• {self.get_text('向下滚动查看更多内容', 'Scroll down to view more content')}[/dim]") 
-        console.print(f"[dim]• {self.get_text('按任意键返回主菜单', 'Press any key to return to main menu')}[/dim]")
-        
-        try:
-            input()
-        except KeyboardInterrupt:
-            pass
-    
-    def create_summary_table(self) -> Table:
-        """创建摘要表格"""
-        table = Table(title=self.get_text("投资信号摘要", "Investment Signals Summary"), box=box.ROUNDED)
-        
-        table.add_column(self.get_text("序号", "No."), style="cyan", no_wrap=True)
-        table.add_column(self.get_text("股票名称", "Stock Name"), style="magenta")
-        table.add_column(self.get_text("股票代码", "Stock Code"), style="magenta")
-        table.add_column(self.get_text("投资动作", "Investment Action"), style="green")
-        table.add_column(self.get_text("分析来源", "Analysis Source"), style="blue")
-        table.add_column(self.get_text("状态", "Status"), style="yellow")
-        
-        step_results = self.final_state.get('step_results', {})
-        best_signals = step_results.get('contest', {}).get('best_signals', [])
-        
-        for i, signal in enumerate(best_signals, 1):
-            symbol_name = signal.get('symbol_name', 'N/A')
-            symbol_code = signal.get('symbol_code', 'N/A')
-            action = signal.get('action', 'N/A')
-            agent_id = signal.get('agent_id', 'N/A')
-            has_opportunity = signal.get('has_opportunity', 'no')
-            
-            status = self.get_text("✅ 推荐", "✅ Recommended") if has_opportunity == 'yes' else self.get_text("❌ 排除", "❌ Excluded")
-            
-            table.add_row(
-                str(i),
-                symbol_name,
-                symbol_code,
-                action,
-                f"Agent {agent_id}",
-                status
-            )
-        
-        return table
-
 def generate_data_report(factors_data: Dict, results_dir: Path) -> tuple[str, Path]:
     """生成数据报告"""
     
@@ -394,16 +290,6 @@ def generate_data_report(factors_data: Dict, results_dir: Path) -> tuple[str, Pa
     return markdown_content, save_path
 
 
-def display_data_report_interactive(factors_data: Dict, results_dir: Path):
-    """显示交互式数据报告"""
-    
-    markdown_content, save_path = generate_data_report(factors_data, results_dir)
-    generator = DataReportGenerator(factors_data)
-    generator.display_interactive_report(markdown_content, save_path)
-    
-    return save_path
-
-
 def generate_final_report(final_state: Dict, results_dir: Path) -> tuple[str, Path]:
     """生成最终报告"""
     
@@ -415,6 +301,8 @@ def generate_final_report(final_state: Dict, results_dir: Path) -> tuple[str, Pa
     
     if trigger_time != 'N/A' and trigger_time is not None:
         safe_time = trigger_time.replace(' ', '_').replace(':', '-')
+    else:
+        safe_time = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
     
     filename = f"final_report_{safe_time}.md"
     research_reports_dir = results_dir / "research_reports"
@@ -423,16 +311,6 @@ def generate_final_report(final_state: Dict, results_dir: Path) -> tuple[str, Pa
     markdown_content = generator.generate_markdown_report(save_path)
     
     return markdown_content, save_path
-
-
-def display_final_report_interactive(final_state: Dict, results_dir: Path):
-    """显示交互式最终报告"""
-
-    markdown_content, save_path = generate_final_report(final_state, results_dir)
-    generator = FinalReportGenerator(final_state)
-    generator.display_interactive_report(markdown_content, save_path)
-
-    return save_path
 
 
 def generate_final_report_json(final_state: Dict, results_dir: Path) -> Path:
@@ -450,11 +328,13 @@ def generate_final_report_json(final_state: Dict, results_dir: Path) -> Path:
     data_team = step_results.get('data_team', {})
     research_team = step_results.get('research_team', {})
     contest = step_results.get('contest', {})
+    aggregation_stats = contest.get('aggregation_stats', {})
     best_signals = contest.get('best_signals', [])
 
     valid_signals = [s for s in best_signals if s.get('has_opportunity', 'no') == 'yes']
     invalid_signals = [s for s in best_signals if s.get('has_opportunity', 'no') != 'yes']
-    signal_rate = f"{len(valid_signals)/len(best_signals)*100:.1f}% ({len(valid_signals)}/{len(best_signals)})" if len(best_signals) > 0 else "0% (0/0)"
+    input_signal_count = aggregation_stats.get('input_count', research_team.get('signals_count', 0))
+    signal_rate = f"{len(valid_signals)/input_signal_count*100:.1f}% ({len(valid_signals)}/{input_signal_count})" if input_signal_count > 0 else "0% (0/0)"
 
     # 转换信号为 web 友好的格式（直接对应 web 渲染需要的字段）
     # 同时按 agent 分组，前端可以按 belief 风格分块展示，不糅在一起
@@ -505,15 +385,6 @@ def generate_final_report_json(final_state: Dict, results_dir: Path) -> Path:
         if isinstance(agent_name, int) or (isinstance(agent_name, str) and agent_name.isdigit()):
             agent_name = f"agent_{agent_name}"
 
-        # 找该 agent 对应的 belief
-        belief_idx = None
-        if agent_name.startswith("agent_"):
-            try:
-                belief_idx = int(agent_name.split("_")[1])
-            except (ValueError, IndexError):
-                belief_idx = None
-        belief_text = beliefs[belief_idx] if belief_idx is not None and 0 <= belief_idx < len(beliefs) else ""
-
         # 兼容 XML 旧格式 + JSON 新格式
         evidences = s.get('evidence_list', [])
         json_evidences = [
@@ -524,25 +395,40 @@ def generate_final_report_json(final_state: Dict, results_dir: Path) -> Path:
             }
             for e in evidences
         ]
+        source_agents = s.get("source_agents", [])
         sig = {
             "name": s.get("symbol_name", ""),
             "code": s.get("symbol_code", ""),
             "action": s.get("action", "buy"),
-            "agent": agent_name,
+            "agent": ", ".join(source_agents) if source_agents else agent_name,
             "evidence": json_evidences,
             "risks": s.get("limitations", s.get("risks", [])),
+            "probability": s.get("probability"),
+            "aggregate_score": s.get("aggregate_score"),
+            "action_consensus": s.get("action_consensus"),
+            "source_agents": s.get("source_agents", []),
         }
         json_signals.append(sig)
 
-        # 写入分组
-        if agent_name not in by_agent:
-            by_agent[agent_name] = {
-                "agent": agent_name,
-                "belief": belief_text,
-                "belief_summary": _belief_summary(belief_text),
-                "signals": [],
-            }
-        by_agent[agent_name]["signals"].append(sig)
+        # 聚合信号仍按其来源 agent 分组，顶层 signals 保持去重。
+        group_agents = source_agents or [agent_name]
+        for group_agent in group_agents:
+            group_belief = ""
+            if group_agent.startswith("agent_"):
+                try:
+                    group_idx = int(group_agent.split("_")[1])
+                    if 0 <= group_idx < len(beliefs):
+                        group_belief = beliefs[group_idx]
+                except (ValueError, IndexError):
+                    pass
+            if group_agent not in by_agent:
+                by_agent[group_agent] = {
+                    "agent": group_agent,
+                    "belief": group_belief,
+                    "belief_summary": _belief_summary(group_belief),
+                    "signals": [],
+                }
+            by_agent[group_agent]["signals"].append(sig)
 
     # 排序 by_agent（按 agent 名稳定顺序）
     by_agent_list = [by_agent[k] for k in sorted(by_agent.keys())]
@@ -559,6 +445,11 @@ def generate_final_report_json(final_state: Dict, results_dir: Path) -> Path:
         "signals": json_signals,
         "by_agent": by_agent_list,
         "invalid_signals_count": len(invalid_signals),
+        "aggregation_stats": aggregation_stats,
+        "agent_failures": {
+            "data": data_team.get("failures", []),
+            "research": research_team.get("failures", []),
+        },
         "elapsed": {
             "data_team": data_team.get("elapsed_seconds", 0),
             "research_team": research_team.get("elapsed_seconds", 0),

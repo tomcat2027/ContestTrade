@@ -3,6 +3,7 @@ import time
 from config.config import PROJECT_ROOT
 from pathlib import Path
 from loguru import logger
+from utils.cache_io import read_cache, write_cache
 
 class DataSourceBase:
     
@@ -18,10 +19,17 @@ class DataSourceBase:
         including cols: ['title', 'content', 'pub_time', 'url']
         """
         cache_file_name = trigger_time.replace(" ", "_").replace(":", "-")
-        cache_file = self.data_cache_dir / f"{cache_file_name}.pkl"
+        cache_file = self.data_cache_dir / f"{cache_file_name}.json.gz"
         if cache_file.exists():
             start_time = time.time()
-            df = pd.read_pickle(cache_file)
+            try:
+                df = read_cache(cache_file)
+            except (OSError, ValueError, TypeError) as exc:
+                logger.warning(f"忽略损坏的数据源缓存 {cache_file}: {exc}")
+                return None
+            if not isinstance(df, pd.DataFrame):
+                logger.warning(f"忽略非 DataFrame 数据源缓存: {cache_file}")
+                return None
             if df['pub_time'].dtype == 'datetime64[ns]':
                 df['pub_time'] = df['pub_time'].dt.strftime('%Y-%m-%d %H:%M:%S')
             elapsed = time.time() - start_time
@@ -32,8 +40,8 @@ class DataSourceBase:
 
     def save_data_cached(self, trigger_time: str, data: pd.DataFrame): 
         cache_file_name = trigger_time.replace(" ", "_").replace(":", "-")
-        cache_file = self.data_cache_dir / f"{cache_file_name}.pkl"
-        data.to_pickle(cache_file)
+        cache_file = self.data_cache_dir / f"{cache_file_name}.json.gz"
+        write_cache(cache_file, data)
 
     def get_data(self, trigger_time: str) -> pd.DataFrame:
         """
@@ -41,6 +49,3 @@ class DataSourceBase:
         including cols: ['title', 'content', 'pub_time', 'url']
         """
         pass
-
-if __name__ == "__main__":
-    pass

@@ -13,7 +13,7 @@
 
 ---
 
-# ContestTrade: A Multi-Agent Trading System Based on Internal Contest Mechanism
+# ContestTrade：A 股多智能体研究与信号聚合系统
 
 **ContestTrade** 是一个面向 A 股的多智能体（Multi-Agent）交易框架。只需设定分析时刻，它能在无人工干预的情况下扫描市场，从海量数据中挖掘潜在事件驱动型投资机会，并通过内部优选机制生成投资组合。
 
@@ -33,10 +33,11 @@ ContestTrade 是一个面向事件驱动选股的多智能体交易框架。系�
   <img src="assets/architecture.jpg" style="width: 90%; height: auto;">
 </p>
 
-ContestTrade 的工作流程通过一个结构化的双阶段管道来运作，模拟了投资公司的动态决策过程。这个双重竞赛框架确保了最终的决策只被最稳健、最有效的洞察所驱动，从而在复杂的市场中保持了强大的适应性和抗干扰能力。
+ContestTrade 通过一个结构化的多阶段管道模拟投资公司的决策过程：数据 Agent 提炼因子，研究 Agent 生成候选交易信号，最后由确定性规则聚合、校验和排序。
 
-1. **数据处理阶段:** 首先，来自多个来源的原始市场数据被输入到**数据团队**。团队中的多个数据分析智能体 (Data Analysis Agents) 并行工作，将这些原始数据提炼成结构化的“文本因子”。在这一阶段，内部竞赛机制会评估每个数据智能体生成的因子的潜在价值，并构建出一个最优的“因子投资组合”。
-2. **研究决策阶段:** 这个最优的因子组合随后被传递给**研究团队**。团队中的多个研究员智能体 (Research Agents) 会基于各自独特的“交易信念” (Trading Beliefs) 和强大的金融工具集，对这些因子进行并行的深度分析，并各自提交交易提案。随后，第二轮内部竞赛会评估这些交易提案，并最终合成一个统一、可靠的资产配置策略作为最终输出。
+1. **数据处理阶段:** 首先，来自多个来源的原始市场数据被输入到**数据团队**。团队中的多个数据分析智能体 (Data Analysis Agents) 并行工作，将这些原始数据提炼成结构化的“文本因子”，供研究团队统一使用。
+2. **研究决策阶段:** 数据因子随后被传递给**研究团队**。多个研究员智能体 (Research Agents) 会基于各自独特的“交易信念” (Trading Beliefs) 和金融工具集进行并行分析，并各自提交交易提案。
+3. **确定性信号聚合阶段:** 系统校验股票代码、动作、概率和证据时间，按股票合并重复提案，处理动作冲突，并根据平均概率、动作一致度、证据完整度和多 Agent 覆盖度生成综合评分，最终按阈值和 Top N 输出结果。基于历史收益动态调整 Agent 权重的完整竞赛机制将作为下一阶段接入。
 
 ## Installation (安装)
 
@@ -54,12 +55,6 @@ pip install -r requirements.txt
 
 ```
 
-或克隆后修改配置，通过 [Docker](https://docs.n8n.io/hosting/installation/docker/)启动:
-
-```
-docker run -it --rm --name contest_trade -v $(pwd)/config.yaml:/ContestTrade/config.yaml finstep/contesttrade:v2.0
-```
-
 ## Configuration (配置)
 
 在运行ContestTrade之前，您需要配置必要的API密钥和LLM参数。
@@ -70,16 +65,15 @@ docker run -it --rm --name contest_trade -v $(pwd)/config.yaml:/ContestTrade/con
 
 | 配置项 (Key)     | 描述 (Description)    | 必需 (Required) |
 | :--------------- | :-------------------- | :-------------: |
-| `TUSHARE_KEY`  | Tushare 数据接口密钥  |       ❌       |
-| `BOCHA_KEY`    | Bocha 搜索引擎密钥    |       ❌       |
-| `SERP_KEY`     | SerpAPI 搜索引擎密钥  |       ❌       |
+| `BOCHA_API_KEY` | Bocha 搜索引擎密钥   |       ❌       |
+| `SERP_API_KEY`  | Serper 搜索引擎密钥  |       ❌       |
 | `LLM`          | 用于通用任务的LLM API |       ✅       |
 | `LLM_THINKING` | 用于复杂推理的LLM API |       ❌       |
 | `VLM`          | 用于视觉分析的VLM API |       ❌       |
 
 </div>
 
-> 注意：LLM API 和 VLM API 需要您自行申请，具体根据您使用的平台和模型填写URL、API Key以及模型名称。当前配置文件默认支持AKShare数据接口，您也可以自行配置Tushare接口及配套配置来获得更好的表现。
+> 注意：LLM API 和 VLM API 需要您自行申请，具体根据您使用的平台和模型填写 URL、API Key 以及模型名称。当前数据链路统一使用 AKShare 与新闻抓取源。
 
 ## Preference (选股偏好)
 

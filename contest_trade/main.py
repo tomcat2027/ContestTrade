@@ -5,7 +5,6 @@ import re
 import json
 import asyncio
 import time
-from datetime import datetime
 from typing import List, Dict, TypedDict
 from langgraph.graph import END, StateGraph
 from langchain_core.runnables import RunnableConfig
@@ -14,6 +13,7 @@ from config.config import cfg, PROJECT_ROOT
 from agents.data_analysis_agent import DataAnalysisAgent, DataAnalysisAgentConfig, DataAnalysisAgentInput
 from agents.research_agent import ResearchAgent, ResearchAgentConfig, ResearchAgentInput
 from utils.market_manager import GLOBAL_MARKET_MANAGER
+from utils.signal_aggregator import SignalAggregatorConfig, aggregate_signals
 from loguru import logger
 
 # 统一的状态定义
@@ -26,6 +26,7 @@ class CompanyState(TypedDict):
 
 class SimpleTradeCompany:
     def __init__(self):
+        cfg.validate_runtime()
         # 设置工作目录
         self.workspace_dir = str(PROJECT_ROOT / "agents_workspace")
         
@@ -73,12 +74,17 @@ class SimpleTradeCompany:
             agent_tasks.append(task)
 
         # 并发执行
-        results = await asyncio.gather(*agent_tasks)
+        results = await asyncio.gather(*agent_tasks, return_exceptions=True)
 
         # 收集结果
         all_factors = []
         all_events = []
-        for result in results:
+        failed_agents = []
+        for agent_id, result in zip(self.data_agents, results):
+            if isinstance(result, BaseException):
+                logger.error(f"Data Agent {agent_id} failed: {result}")
+                failed_agents.append({"agent_id": agent_id, "error": str(result)})
+                continue
             if result:
                 all_factors.append(result["factor"])
                 all_events.extend(result["events"])
@@ -92,7 +98,13 @@ class SimpleTradeCompany:
         all_events_state.extend(all_events)
 
         step_results = state["step_results"].copy()
-        step_results["data_team"] = {"factors_count": len(all_factors), "events_count": len(all_events), "elapsed_seconds": step_elapsed}
+        step_results["data_team"] = {
+            "factors_count": len(all_factors),
+            "events_count": len(all_events),
+            "failed_count": len(failed_agents),
+            "failures": failed_agents,
+            "elapsed_seconds": step_elapsed,
+        }
 
         return {
             "data_factors": all_factors,
@@ -117,12 +129,17 @@ class SimpleTradeCompany:
             agent_tasks.append(task)
 
         # 并发执行
-        results = await asyncio.gather(*agent_tasks)
+        results = await asyncio.gather(*agent_tasks, return_exceptions=True)
 
         # 收集结果
         all_signals = []
         all_events = []
-        for result in results:
+        failed_agents = []
+        for agent_id, result in zip(self.research_agents, results):
+            if isinstance(result, BaseException):
+                logger.error(f"Research Agent {agent_id} failed: {result}")
+                failed_agents.append({"agent_id": agent_id, "error": str(result)})
+                continue
             if result and result["signals"]:
                 all_signals.extend(result["signals"])
                 all_events.extend(result["events"])
@@ -136,7 +153,13 @@ class SimpleTradeCompany:
         all_events_state.extend(all_events)
 
         step_results = state["step_results"].copy()
-        step_results["research_team"] = {"signals_count": len(all_signals), "events_count": len(all_events), "elapsed_seconds": step_elapsed}
+        step_results["research_team"] = {
+            "signals_count": len(all_signals),
+            "events_count": len(all_events),
+            "failed_count": len(failed_agents),
+            "failures": failed_agents,
+            "elapsed_seconds": step_elapsed,
+        }
 
         return {
             "research_signals": all_signals,
@@ -147,30 +170,27 @@ class SimpleTradeCompany:
     async def finalize_step(self, state: CompanyState, config: RunnableConfig) -> CompanyState:
         """最终结果步骤"""
         trigger_time = state["trigger_time"]
-        data_factors = state["data_factors"]
         research_signals = state["research_signals"]
-        all_events = state["all_events"]
         step_results = state["step_results"]
         
         print("🚀 开始最终结果步骤...")
-        # 优先使用research产生的信号作为最终最佳信号
-        best_signals = research_signals if research_signals else []
-
-        # 生成最终结果（保留但不额外输出）
-        final_result = {
-            "trigger_time": trigger_time,
-            "data_factors_count": len(data_factors),
-            "research_signals_count": len(research_signals),
-            "total_events_count": len(all_events),
-            "best_signals": best_signals,
-            "step_results": step_results
-        }
+        aggregator_config = SignalAggregatorConfig.from_dict(
+            getattr(cfg, "signal_aggregator_config", {})
+        )
+        aggregation = aggregate_signals(
+            research_signals,
+            trigger_time=trigger_time,
+            config=aggregator_config,
+        )
+        best_signals = aggregation["signals"]
 
         print("✅ 最终结果步骤完成")
 
-        step_results = state["step_results"]
         step_results["contest"] = {
-            "best_signals": best_signals
+            "best_signals": best_signals,
+            "aggregation_stats": aggregation["stats"],
+            "rejected_signals": aggregation["rejected"],
+            "filtered_signals": aggregation["filtered"],
         }
         return {
             "step_results": step_results
@@ -260,13 +280,12 @@ class SimpleTradeCompany:
         if agent_output:
             if "result" in agent_output and agent_output["result"]:
                 result_obj = agent_output["result"]
-                # 优先用 research agent 已解析的 JSON signals（_parse_json_signals 已跑过）
-                # 注意：LangGraph 事件流只暴露 on_chain_end 的 output，可能不含 parsed_signals 字段
-                # 因此 main.py 自己再做一遍 JSON 优先 + XML 回退的解析
-                signals = self._parse_signals_robust(
-                    result_obj.final_result_thinking,
-                    result_obj.final_result,
-                )
+                signals = result_obj.parsed_signals
+                if not signals:
+                    signals = self._parse_signals_robust(
+                        result_obj.final_result_thinking,
+                        result_obj.final_result,
+                    )
             else:
                 signals = self._parse_signals_robust(
                     agent_output.get("final_result_thinking", ""),
@@ -489,62 +508,3 @@ class SimpleTradeCompany:
         workflow = self.create_company_workflow()
         async for event in workflow.astream_events(initial_state, version="v2", config=config):
             yield event
-
-if __name__ == "__main__":
-    async def main():
-        company = SimpleTradeCompany()
-        
-        # 使用事件流运行
-        print("🚀 开始测试Simplified TradeCompany事件流...")
-        print("=" * 60)
-
-        trigger_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        company_events = []
-        final_state = None
-        
-        async for event in company.run_company_with_events(trigger_time):
-            company_events.append(event)
-            
-            # 监听并打印事件
-            event_type = event.get("event", "unknown")
-            event_name = event.get("name", "unknown")
-            
-            if event_type == "on_chain_start":
-                if event_name != "__start__":
-                    print(f"🔄 Company开始: {event_name}")
-            elif event_type == "on_chain_end":
-                if event_name != "__start__":
-                    print(f"✅ Company完成: {event_name}")
-                    if event_name == "finalize":
-                        final_state = event.get("data", {}).get("output", {})
-            elif event_type == "on_custom":
-                custom_name = event.get("name", "")
-                custom_data = event.get("data", {})
-                
-                if custom_name.startswith("data_agent_"):
-                    agent_id = custom_data.get("agent_id", "unknown")
-                    print(f"📊 Data Agent {agent_id}: {custom_name}")
-                elif custom_name.startswith("research_agent_"):
-                    agent_id = custom_data.get("agent_id", "unknown")
-                    print(f"🔍 Research Agent {agent_id}: {custom_name}")
-                else:
-                    print(f"🎯 自定义事件: {custom_name}")
-        
-        print("=" * 60)
-        print(f"✅ 公司工作流完成:")
-        if final_state:
-            step_results = final_state.get('step_results', {})
-            data_team_results = step_results.get("data_team", {})
-            research_team_results = step_results.get("research_team", {})
-            
-            data_factors_count = data_team_results.get("factors_count", len(final_state.get('data_factors', [])))
-            research_signals_count = research_team_results.get("signals_count", len(final_state.get('research_signals', [])))
-            
-            print(f"   数据因子: {data_factors_count}")
-            print(f"   研究信号: {research_signals_count}")
-        else:
-            print(f"   无最终状态数据")
-        print(f"   公司事件总数: {len(company_events)}")
-        
-    asyncio.run(main())

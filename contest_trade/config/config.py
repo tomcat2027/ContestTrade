@@ -32,8 +32,7 @@ class ProjectConfig:
         # Store the market type for reference
         self.market_type = market_type
 
-    # provider 识别 → 对应环境变量名
-    # 优先级：列表中靠前的先匹配；都未命中则用最后的 fallback 列表
+    # provider 识别 → 对应环境变量名。未识别的 URL 不会猜测或回退到其他密钥。
     _LLM_KEY_PROVIDERS = [
         ("longcat",     "LONGCAT_API_KEY"),
         ("sensenova",   "DEEPSEEK_API_KEY"),
@@ -41,53 +40,45 @@ class ProjectConfig:
         ("minimax",     "MINIMAX_API_KEY"),
         ("dashscope",   "DASHSCOPE_API_KEY"),
     ]
-    _VLM_KEY_PROVIDERS = _LLM_KEY_PROVIDERS  # VLM 复用同一张表
-    _LLM_KEY_FALLBACK_CHAIN = [
-        "LONGCAT_API_KEY",
-        "DEEPSEEK_API_KEY",
-        "MINIMAX_API_KEY",
-        "DASHSCOPE_API_KEY",
-    ]
+    _VLM_KEY_PROVIDERS = _LLM_KEY_PROVIDERS
 
-    def _resolve_key_from_base_url(self, base_url: str, providers: list, fallback_chain: list):
-        """根据 base_url 子串匹配返回环境变量名；未匹配时返回 fallback_chain 中第一个有值的 var 名（None 表示都无值）。"""
+    def _resolve_key_from_base_url(self, base_url: str, providers: list):
+        """根据 base_url 子串匹配环境变量名，未匹配时返回 None。"""
         url_lower = (base_url or "").lower()
         for substring, env_name in providers:
             if substring in url_lower:
                 return env_name
-        # 未匹配：按 fallback chain 找第一个有值的
-        for env_name in fallback_chain:
-            if os.environ.get(env_name):
-                return env_name
         return None
+
+    @staticmethod
+    def _is_placeholder(value: str) -> bool:
+        normalized = str(value or "").strip().upper()
+        return not normalized or normalized.startswith("YOUR_")
+
+    def _override_model_key(self, model_config: dict, providers: list):
+        env_name = model_config.get("api_key_env") or self._resolve_key_from_base_url(
+            model_config.get("base_url", ""), providers
+        )
+        if env_name and os.environ.get(env_name):
+            model_config["api_key"] = os.environ[env_name]
+        elif self._is_placeholder(model_config.get("api_key", "")):
+            # 占位符不能被当作可用密钥传给上游 API。
+            model_config["api_key"] = ""
 
     def _load_secrets_from_env(self):
         """从环境变量加载敏感配置，优先于 YAML 中的值。"""
-        # LLM API Key：按 base_url 匹配 provider，再决定 env var
+        # 每个模型配置独立解析密钥，避免 LLM 的 key 被隐式复制给 thinking/VLM。
         if hasattr(self, "llm"):
-            env_name = self._resolve_key_from_base_url(
-                self.llm.get("base_url", ""),
-                self._LLM_KEY_PROVIDERS,
-                self._LLM_KEY_FALLBACK_CHAIN,
-            )
-            if env_name and os.environ.get(env_name):
-                self.llm["api_key"] = os.environ[env_name]
-                if hasattr(self, "llm_thinking"):
-                    self.llm_thinking["api_key"] = os.environ[env_name]
+            self._override_model_key(self.llm, self._LLM_KEY_PROVIDERS)
+        if hasattr(self, "llm_thinking"):
+            self._override_model_key(self.llm_thinking, self._LLM_KEY_PROVIDERS)
 
         # VLM API Key：复用 LLM 的 provider 表 + fallback
         if hasattr(self, "vlm"):
-            env_name = self._resolve_key_from_base_url(
-                self.vlm.get("base_url", ""),
-                self._VLM_KEY_PROVIDERS,
-                self._LLM_KEY_FALLBACK_CHAIN,
-            )
-            if env_name and os.environ.get(env_name):
-                self.vlm["api_key"] = os.environ[env_name]
+            self._override_model_key(self.vlm, self._VLM_KEY_PROVIDERS)
 
-        # 数据/搜索/US Provider Keys：每个独立 env var，直接覆盖
+        # 搜索 Provider Keys：每个独立 env var，直接覆盖
         _SINGLE_KEY_OVERRIDES = [
-            ("TUSHARE_KEY",        "tushare_key"),
             ("BOCHA_API_KEY",      "bocha_key"),
             ("SERP_API_KEY",       "serp_key"),
         ]
@@ -96,13 +87,29 @@ class ProjectConfig:
             if val and hasattr(self, attr):
                 setattr(self, attr, val)
 
-cfg = ProjectConfig()
+    def runtime_config_errors(self) -> list[str]:
+        """Return actionable errors that would prevent an analysis run."""
+        errors = []
+        llm = getattr(self, "llm", {})
+        provider = str(llm.get("provider", "openai")).lower()
+        if provider != "ollama" and self._is_placeholder(llm.get("api_key", "")):
+            env_name = llm.get("api_key_env") or "the configured model API key"
+            errors.append(f"LLM API key is missing; set {env_name}")
+        if not llm.get("model_name"):
+            errors.append("llm.model_name is missing")
+        if not getattr(self, "data_agents_config", None):
+            errors.append("data_agents_config must contain at least one agent")
+        research = getattr(self, "research_agent_config", {})
+        if not research.get("tools"):
+            errors.append("research_agent_config.tools must contain at least one tool")
+        belief_path = PROJECT_ROOT / research.get("belief_list_path", "")
+        if not belief_path.is_file():
+            errors.append(f"research belief file does not exist: {belief_path}")
+        return errors
 
-if __name__ == "__main__":
-    print(f"Market Type: {cfg.market_type}")
-    print(f"Data Agents Config: {cfg.data_agents_config}")
-    print(f"Research Agent Config: {cfg.research_agent_config}")
-    print(f"Market Config File: {cfg.market_config_file}")
-    print(f"System Language: {cfg.system_language}")
-    print(f"LLM Config: {cfg.llm}")
-    print(f"Available attributes: {[attr for attr in dir(cfg) if not attr.startswith('_')]}")
+    def validate_runtime(self) -> None:
+        errors = self.runtime_config_errors()
+        if errors:
+            raise ValueError("Invalid runtime configuration: " + "; ".join(errors))
+
+cfg = ProjectConfig()

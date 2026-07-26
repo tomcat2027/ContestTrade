@@ -126,6 +126,7 @@ class DataAnalysisAgent:
     def set_source_by_config(self, data_source_list):
         """设置数据源配置"""
         self.data_source_list = []
+        failures = []
         
         for source_path in data_source_list:
             try:
@@ -149,10 +150,15 @@ class DataAnalysisAgent:
 
             except (ImportError, AttributeError) as e:
                 logger.error(f"Error loading data source '{source_path}': {e}")
-                continue
+                failures.append(f"{source_path}: {e}")
             except Exception as e:
                 logger.error(f"Unexpected error loading '{source_path}': {e}")
-                continue
+                failures.append(f"{source_path}: {e}")
+
+        if failures:
+            raise ValueError("Failed to load configured data sources: " + "; ".join(failures))
+        if not self.data_source_list:
+            raise ValueError(f"Data agent {self.config.agent_name} has no configured data sources")
 
 
     def _build_graph(self) -> StateGraph:
@@ -629,44 +635,3 @@ class DataAnalysisAgent:
                         if final_state and "result" in final_state and final_state["result"]:
                             return final_state["result"]
         return final_result
-        
-
-if __name__ == "__main__":
-    import json
-    from data_source.thx_news import ThxNews
-    from data_source.sina_news import SinaNews
-
-    data_source_list = [
-        # "data_source.thx_news.ThxNews",
-        "data_source.sina_news.SinaNews"
-        #"data_source.price_market.PriceMarket",
-    ]
-    
-    # Create custom configuration
-    custom_config = DataAnalysisAgentConfig(
-        agent_name="sina_news_vtest",
-        source_list=data_source_list,
-        final_target_tokens=4000,
-        bias_goal="",
-    )
-    
-    # Run detailed analysis generation
-    async def main():
-        trigger_datetime = "2024-01-23 09:00:00"
-        data_agent = DataAnalysisAgent(custom_config)
-
-        agent_input = DataAnalysisAgentInput(
-            trigger_time=trigger_datetime,
-        )
-
-        output = await data_agent.run_with_monitoring(agent_input)
-        print("=== Detailed Analysis Results ===")
-        if output and hasattr(output, 'context_string') and output.context_string:
-            print(f"Summary: {output.context_string}")
-        else:
-            print("❌ No summary available", output)
-    
-    asyncio.run(main()) 
-
-
-    pass

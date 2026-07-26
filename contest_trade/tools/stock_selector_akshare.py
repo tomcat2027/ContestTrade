@@ -4,7 +4,6 @@ Based on natural language query and akshare stock basic data.
 """
 import re
 import json
-import asyncio
 import pandas as pd
 import numpy as np
 from pydantic import BaseModel, Field
@@ -192,13 +191,3 @@ async def stock_selector(market: str, query: str, trigger_time: str, limit: int 
         
     except Exception as e:
         return f"Stock selector error: {str(e)}"
-
-
-if __name__ == "__main__":
-    result = asyncio.run(stock_selector.ainvoke({
-        "market": "CN-Stock",
-        "query": "市值最大的5只光刻机股",
-        "trigger_time": "2025-08-20 09:00:00",
-        "limit": 5
-    }))
-    print(result)

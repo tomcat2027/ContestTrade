@@ -321,18 +321,3 @@ class ThxNewsCrawl(DataSourceBase):
         logger.info(f"Final result: {len(df)} rows after deduplication and time filtering")
         return df
 
-
-if __name__ == "__main__":
-    crawler = ThxNewsCrawl(max_pages=5, enable_frontend_crawl=True)
-    df = asyncio.run(crawler.get_data("2025-08-21 15:00:00"))
-    print(f"Total records: {len(df)}")
-    print(df.head())
-    # try:
-    #     output_path = os.path.join(os.path.dirname(__file__), "10jqk_news_crawl.json")
-    #     df.to_json(output_path, orient="records", force_ascii=False, date_format="iso")
-    #     print(f"Saved JSON to: {output_path}")
-    # except Exception as e:
-    #     print(f"Failed to save JSON: {e}")
-
-
-

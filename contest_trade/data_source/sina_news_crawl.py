@@ -26,7 +26,7 @@ class SinaNewsCrawl(DataSourceBase):
         self.start_page = start_page
         self.end_page = end_page
         # 使用你提供的完整URL格式，page/r/callback 将在请求时动态生成
-        self.base_url = "http://feed.mix.sina.com.cn/api/roll/get"
+        self.base_url = "https://feed.mix.sina.com.cn/api/roll/get"
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
             "Referer": "https://finance.sina.com.cn/",
@@ -47,26 +47,31 @@ class SinaNewsCrawl(DataSourceBase):
             "page": page
         }
         
-        try:
-            async with session.get(self.base_url, params=params, headers=self.headers, timeout=15) as response:
-                text = await response.text()
+        for attempt in range(3):
+            try:
+                async with session.get(self.base_url, params=params, headers=self.headers, timeout=15) as response:
+                    response.raise_for_status()
+                    text = await response.text()
                 
-                # 兼容 JSONP 与 纯 JSON
-                m = re.search(r'^\s*[\w$]+\((.*)\)\s*;?\s*$', text.strip(), re.S)
-                json_text = m.group(1) if m else text.strip()
-                data = json.loads(json_text)
+                    # 兼容 JSONP 与 纯 JSON
+                    m = re.search(r'^\s*[\w$]+\((.*)\)\s*;?\s*$', text.strip(), re.S)
+                    json_text = m.group(1) if m else text.strip()
+                    data = json.loads(json_text)
                 
-                # 提取items（仅保留指定字段）
-                items = self.extract_items(data, page)
+                    # 提取items（仅保留指定字段）
+                    items = self.extract_items(data, page)
 
-                # 尝试补全 intro
-                if self.fetch_full_intro and items:
-                    await self.enrich_items_with_full_intro(session, items)
+                    # 尝试补全 intro
+                    if self.fetch_full_intro and items:
+                        await self.enrich_items_with_full_intro(session, items)
 
-                return items
-                
-        except Exception as e:
-            return []
+                    return items
+            except (aiohttp.ClientError, asyncio.TimeoutError, json.JSONDecodeError) as exc:
+                if attempt == 2:
+                    logger.warning(f"新浪新闻第 {page} 页抓取失败: {exc}")
+                    return []
+                await asyncio.sleep(0.5 * (2 ** attempt) + random.uniform(0, 0.2))
+        return []
     
     def extract_items(self, data, page):
         """提取新闻items，并裁剪为目标字段集"""
@@ -356,15 +361,3 @@ class SinaNewsCrawl(DataSourceBase):
         df = df[keep_cols].copy()
         logger.info(f"get sina news until {trigger_time} success. Total {len(df)} rows")
         return df
-
-if __name__ == "__main__":
-    crawler = SinaNewsCrawl(start_page=1, end_page=50)
-    df = asyncio.run(crawler.get_data("2025-08-21 15:00:00"))
-    print(len(df))
-    # try:
-    #     output_path = os.path.join(os.path.dirname(__file__), "sina_news_crawl.json")
-    #     df.to_json(output_path, orient="records", force_ascii=False, date_format="iso")
-    #     print(f"Saved JSON to: {output_path}")
-    # except Exception as e:
-    #     print(f"Failed to save JSON: {e}")
- 

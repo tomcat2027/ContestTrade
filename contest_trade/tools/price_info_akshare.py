@@ -2,7 +2,6 @@
 Price Info Tools
 """
 
-import asyncio
 import pandas as pd
 from pydantic import BaseModel, Field
 from datetime import datetime, timedelta
@@ -69,16 +68,3 @@ async def price_info(market: str, symbol: str, trigger_time: str=None) -> str:
             return {"error": "Market not supported."}
     except Exception as e:
         return {"error": str(e)}
-
-if __name__ == "__main__":
-    result = asyncio.run(price_info.ainvoke(
-        { "market": "CN-Stock", 
-         "symbol": "600519.SH", 
-         "trigger_time": "2025-07-09 15:00:00"}))
-    print(result)
-
-    result = asyncio.run(price_info.ainvoke(
-        { "market": "HK-Stock", 
-         "symbol": "009988.HK", 
-         "trigger_time": "2025-07-09 15:00:00"}))
-    print(result)

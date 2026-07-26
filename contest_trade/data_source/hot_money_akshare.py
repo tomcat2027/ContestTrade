@@ -10,7 +10,6 @@
 5. 使用LLM分析并生成热钱市场分析报告
 """
 import pandas as pd
-import asyncio
 import traceback
 from datetime import datetime, timedelta
 from data_source.data_source_base import DataSourceBase
@@ -383,11 +382,3 @@ class HotMoneyAkshare(DataSourceBase):
             )
         
         return "\n".join(sections)
-
-if __name__ == "__main__":
-    hot_money = HotMoneyAkshare()
-    df = asyncio.run(hot_money.get_data("2025-08-19 09:00:00"))
-    print(df.head())
-    if len(df) > 0:
-        print("热钱市场分析内容:")
-        print(df.content.values[0])

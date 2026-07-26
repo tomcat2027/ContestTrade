@@ -3,7 +3,6 @@
 整合K线数据、板块资金流向等，生成综合宏观市场分析
 """
 import pandas as pd
-import asyncio
 import traceback
 from datetime import datetime
 from data_source.data_source_base import DataSourceBase
@@ -525,8 +524,3 @@ class PriceMarketAkshare(DataSourceBase):
             descriptions.append(desc)
         
         return f"{trade_date}三大指数收盘情况：\n\n" + "\n\n".join(descriptions)
-
-if __name__ == "__main__":
-    price_market = PriceMarketAkshare()
-    df = asyncio.run(price_market.get_data("2024-08-19 09:00:00"))
-    print(df.content.values[0])

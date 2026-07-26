@@ -84,7 +84,7 @@ ContestTrade 是一个由社区驱动的开源项目，我们相信，正是社�
 
 1.  **创建特性分支：** 从 `dev` 分支创建一个新的特性分支。请遵循清晰的命名规范，例如：
     * 新功能: `feat/add-new-data-source`
-    * 修复Bug: `fix/tushare-api-error`
+    * 修复Bug: `fix/akshare-api-error`
     * 文档: `docs/update-contributing-guide`
     ```bash
     git checkout -b feat/your-feature-name

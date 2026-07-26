@@ -1,11 +1,9 @@
 """
 Stock Symbol Search Tool (AKShare Version)
 Search for stock symbols by company names or partial symbols using AKShare data.
-Replaces the tushare-dependent version with better reliability.
+Uses the project's unified AKShare data path.
 """
 import re
-import json
-import asyncio
 import pandas as pd
 from typing import List, Dict, Any
 from pydantic import BaseModel, Field
@@ -219,17 +217,3 @@ async def stock_symbol_search(
             "summary": {"total_queries": len(queries), "successful_matches": 0, "failed_matches": len(queries)},
             "failed_queries": [{"query": q, "error": error_msg} for q in queries]
         }
-
-if __name__ == "__main__":
-    # Test the tool
-    async def test():
-        result = await stock_symbol_search.ainvoke({
-            "market": "CN-Stock",
-            "queries": ["茅台", "平安银行", "000001", "腾讯"],
-            "trigger_time": "2025-08-21 12:00:00",
-            "limit_per_query": 3,
-            "match_mode": "best"
-        })
-        print(json.dumps(result, indent=2, ensure_ascii=False))
-    
-    asyncio.run(test())
