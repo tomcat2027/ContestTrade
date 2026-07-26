@@ -10,13 +10,11 @@ import functools
 import asyncio
 import importlib
 import json
-import sys
-from pathlib import Path
 from loguru import logger
 from typing import Dict, List, Any, Callable, Optional, Union, Type
 from langchain_core.tools import tool, BaseTool
 from pydantic import BaseModel, Field
-from models.llm_model import GLOBAL_LLM
+from contest_trade.models.llm_model import GLOBAL_LLM
 
 class ToolManagerConfig:
     def __init__(self, tool_paths: List[str]):
@@ -28,10 +26,6 @@ class ToolManager:
     def __init__(self, config: ToolManagerConfig):
         self.tools: Dict[str, Callable] = {}
         
-        # ensure relative import support
-        PROJECT_ROOT = Path(__file__).parent.parent.resolve()
-        sys.path.append(str(PROJECT_ROOT))
-
         if config.tool_paths:
             self._register_from_configs(config.tool_paths)
         
@@ -63,6 +57,8 @@ class ToolManager:
             parts = module_path.split('.')
             func_name = parts[-1]
             module_name = '.'.join(parts[:-1])
+            if module_name.startswith("tools."):
+                module_name = f"contest_trade.{module_name}"
 
             module = importlib.import_module(module_name)
             func = getattr(module, func_name)
@@ -326,4 +322,3 @@ class PrintHelloInput(BaseModel):
 )
 async def print_string(input_string: str):
     return input_string
-

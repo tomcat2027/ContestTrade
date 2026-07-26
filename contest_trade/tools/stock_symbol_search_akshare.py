@@ -9,8 +9,8 @@ from typing import List, Dict, Any
 from pydantic import BaseModel, Field
 from functools import lru_cache
 
-from tools.tool_utils import smart_tool
-from utils.akshare_utils import akshare_cached
+from contest_trade.tools.tool_utils import smart_tool
+from contest_trade.utils.akshare_utils import akshare_cached
 
 class StockSymbolSearchAkshareInput(BaseModel):
     market: str = Field(description="The target market. Currently supports: CN-Stock")

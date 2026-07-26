@@ -16,11 +16,11 @@ from langgraph.graph import StateGraph, END
 from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
-from utils.llm_utils import count_tokens
-from models.llm_model import GLOBAL_LLM
+from contest_trade.utils.llm_utils import count_tokens
+from contest_trade.models.llm_model import GLOBAL_LLM
 from langchain_core.runnables import RunnableConfig
-from config.config import PROJECT_ROOT, cfg
-from agents.prompts import prompt_for_data_analysis_summary_doc, prompt_for_data_analysis_filter_doc, prompt_for_data_analysis_merge_summary
+from contest_trade.config.config import PROJECT_ROOT, cfg
+from contest_trade.agents.prompts import prompt_for_data_analysis_summary_doc, prompt_for_data_analysis_filter_doc, prompt_for_data_analysis_merge_summary
 from loguru import logger
 
 
@@ -134,6 +134,8 @@ class DataAnalysisAgent:
                 parts = source_path.split('.')
                 class_name = parts[-1]
                 module_name = '.'.join(parts[:-1])
+                if module_name.startswith("data_source."):
+                    module_name = f"contest_trade.{module_name}"
                 
                 # 动态导入模块
                 module = importlib.import_module(module_name)

@@ -12,11 +12,11 @@
 import pandas as pd
 import traceback
 from datetime import datetime, timedelta
-from data_source.data_source_base import DataSourceBase
-from utils.akshare_utils import akshare_cached
-from models.llm_model import GLOBAL_LLM
+from contest_trade.data_source.data_source_base import DataSourceBase
+from contest_trade.utils.akshare_utils import akshare_cached
+from contest_trade.models.llm_model import GLOBAL_LLM
 from loguru import logger
-from utils.date_utils import get_previous_trading_date
+from contest_trade.utils.date_utils import get_previous_trading_date
 
 class HotMoneyAkshare(DataSourceBase):
     def __init__(self):

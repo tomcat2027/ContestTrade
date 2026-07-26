@@ -1,6 +1,10 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "ContestTrade"
-version = "1.1.0"
+version = "1.2.0"
 description = "ContestTrade: an A-share multi-agent research and deterministic signal aggregation system."
 requires-python = ">=3.10"
 dependencies = [
@@ -26,3 +30,14 @@ dependencies = [
 
 [project.scripts]
 contesttrade = "cli.main:app"
+
+[tool.setuptools.packages.find]
+include = ["cli*", "contest_trade*"]
+
+[tool.setuptools.package-data]
+cli = ["static/*.txt"]
+contest_trade = [
+    "config/*.json",
+    "config/*.yaml",
+    "utils/cache/market_manager/*.json",
+]

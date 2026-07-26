@@ -3,10 +3,10 @@ Corporate Info Tools (Akshare Version)
 """
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
-from utils.akshare_utils import akshare_cached
-from tools.tool_prompts import FINANCIAL_TOOL_SELECT_PROMPT
-from tools.tool_utils import ToolManager, ToolManagerConfig
-from tools.tool_utils import smart_tool
+from contest_trade.utils.akshare_utils import akshare_cached
+from contest_trade.tools.tool_prompts import FINANCIAL_TOOL_SELECT_PROMPT
+from contest_trade.tools.tool_utils import ToolManager, ToolManagerConfig
+from contest_trade.tools.tool_utils import smart_tool
 
 class CompanyFinancialInput(BaseModel):
     market: str = Field(description="The market of the company.")
@@ -26,12 +26,12 @@ async def company_financial_info(market: str, symbol: str, task: str, trigger_ti
         return {"error": "Currently only CN-Stock is supported for Akshare version."}
         
     tools_config = ToolManagerConfig(tool_paths=[
-        "tools.corp_info_akshare.company_income",
-        "tools.corp_info_akshare.company_balance_sheet",
-        "tools.corp_info_akshare.company_cash_flow",
-        "tools.corp_info_akshare.company_forecast",
-        "tools.corp_info_akshare.company_express",
-        "tools.corp_info_akshare.company_dividend",
+        "contest_trade.tools.corp_info_akshare.company_income",
+        "contest_trade.tools.corp_info_akshare.company_balance_sheet",
+        "contest_trade.tools.corp_info_akshare.company_cash_flow",
+        "contest_trade.tools.corp_info_akshare.company_forecast",
+        "contest_trade.tools.corp_info_akshare.company_express",
+        "contest_trade.tools.corp_info_akshare.company_dividend",
     ])
     inner_tool_manager = ToolManager(tools_config)
     tool_selection_prompt = FINANCIAL_TOOL_SELECT_PROMPT.format(

@@ -11,14 +11,8 @@ from typing import List, Dict, Any
 import time
 import random
 import os
-import sys
 from loguru import logger
-current_dir = os.path.dirname(__file__)
-package_root = os.path.dirname(current_dir)
-if package_root not in sys.path:
-    sys.path.insert(0, package_root)
-
-from data_source.data_source_base import DataSourceBase
+from contest_trade.data_source.data_source_base import DataSourceBase
 
 # 延迟导入 crawl4ai，避免 Python 3.9 不支持 type | None 语法导致加载失败
 try:
@@ -320,4 +314,3 @@ class ThxNewsCrawl(DataSourceBase):
         
         logger.info(f"Final result: {len(df)} rows after deduplication and time filtering")
         return df
-

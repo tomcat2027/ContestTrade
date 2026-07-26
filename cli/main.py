@@ -2,7 +2,6 @@
 ContestTrade: A 股 Multi-Agent 研究与信号聚合系统
 """
 import asyncio
-import sys
 import json
 import os
 from importlib.metadata import PackageNotFoundError, version as package_version
@@ -43,6 +42,74 @@ app = typer.Typer(
 )
 
 
+def run_unattended_analysis(
+    trigger_time: str,
+    timeout_seconds: int,
+) -> tuple[str, Dict]:
+    """Run one guarded analysis suitable for cron or launchd."""
+    from loguru import logger
+
+    from contest_trade.config.config import cfg
+    from contest_trade.main import SimpleTradeCompany
+    from contest_trade.operations.runtime import (
+        RunJournal,
+        RunLock,
+        assess_run,
+        configure_scheduled_logging,
+    )
+
+    with RunLock():
+        journal = RunJournal(trigger_time)
+        journal.start()
+        sink_id = None
+        try:
+            sink_id = configure_scheduled_logging(
+                int(
+                    getattr(cfg, "scheduled_run_config", {}).get(
+                        "log_retention_days", 30
+                    )
+                )
+            )
+            company = SimpleTradeCompany()
+
+            async def _run_with_timeout():
+                return await asyncio.wait_for(
+                    company.run_company(trigger_time), timeout=timeout_seconds
+                )
+
+            final_state = asyncio.run(_run_with_timeout())
+            if not final_state:
+                return "failed", journal.finish(
+                    "failed", "workflow returned no final state"
+                )
+
+            report_paths = generate_analysis_reports(final_state, trigger_time)
+            status, message, metrics = assess_run(
+                final_state,
+                expected_data_agents=len(company.data_agents),
+                expected_research_agents=len(company.research_agents),
+            )
+            return status, journal.finish(
+                status,
+                message,
+                metrics=metrics,
+                reports=report_paths,
+            )
+        except asyncio.TimeoutError as exc:
+            journal.finish(
+                "failed", f"analysis timed out after {timeout_seconds} seconds"
+            )
+            raise RuntimeError(
+                f"analysis timed out after {timeout_seconds} seconds"
+            ) from exc
+        except Exception as exc:
+            journal.finish("failed", f"{type(exc).__name__}: {exc}")
+            raise
+        finally:
+            if sink_id is not None:
+                logger.remove(sink_id)
+
+
 def generate_analysis_reports(final_state: Dict, trigger_time: str) -> Dict[str, Path]:
     """Generate every persisted report through one shared CLI path."""
     from contest_trade.config.config import PROJECT_ROOT
@@ -67,8 +134,6 @@ def _get_agent_config():
     """从配置文件动态获取代理配置"""
     # Import config after environment variable is set
     from contest_trade.config.config import cfg, PROJECT_ROOT
-    import sys
-    sys.path.append(str(PROJECT_ROOT))
     
     agent_status = {}
     
@@ -803,6 +868,12 @@ def display_detailed_report(final_state: Dict):
 def run(
     market: Optional[str] = typer.Option("CN-Stock", "--market", "-m", help="市场（仅支持 CN-Stock）"),
     silent: bool = typer.Option(False, "--silent", "-s", help="静默模式，无交互确认，直接运行"),
+    timeout_seconds: int = typer.Option(
+        1800,
+        "--timeout-seconds",
+        min=60,
+        help="静默运行的总超时秒数",
+    ),
 ):
     """运行ContestTrade分析"""
 
@@ -854,26 +925,22 @@ def run(
 
     # 静默模式下直接运行一次就退出
     if silent:
+        from contest_trade.operations.runtime import RunAlreadyActiveError
+
         try:
-            from contest_trade.main import SimpleTradeCompany
-            company = SimpleTradeCompany()
-            final_state = asyncio.run(company.run_company(trigger_time))
-            if final_state:
-                console.print("[green]✅ 分析完成[/green]")
-
-                try:
-                    report_paths = generate_analysis_reports(final_state, trigger_time)
-                    for report_type, report_path in report_paths.items():
-                        console.print(f"[green]📄 {report_type}: {report_path}[/green]")
-
-                except Exception as report_err:
-                    console.print(f"[red]❌ 报告生成失败: {report_err}[/red]")
-                    raise typer.Exit(1)
-
-            else:
-                console.print("[red]❌ 分析失败[/red]")
+            status, health = run_unattended_analysis(trigger_time, timeout_seconds)
+        except RunAlreadyActiveError as exc:
+            console.print(f"[yellow]⏭️ 跳过：{exc}[/yellow]")
+            raise typer.Exit(75)
         except Exception as e:
             console.print(f"[red]运行分析时发生错误: {e}[/red]")
+            raise typer.Exit(1)
+
+        color = "green" if status == "success" else "yellow"
+        console.print(f"[{color}]分析状态: {status} - {health['message']}[/{color}]")
+        for report_type, report_path in health.get("reports", {}).items():
+            console.print(f"[{color}]📄 {report_type}: {report_path}[/{color}]")
+        if status == "failed":
             raise typer.Exit(1)
         return
 
@@ -954,6 +1021,76 @@ def config():
         console.print(f"[red]配置加载失败: {e}[/red]")
         raise typer.Exit(1)
 
+
+@app.command()
+def doctor(
+    strict: bool = typer.Option(
+        False, "--strict", help="没有近期成功运行时返回非零退出码"
+    ),
+    stale_after_hours: int = typer.Option(
+        36, "--stale-after-hours", min=1, help="超过该时长视为运行状态过期"
+    ),
+):
+    """检查无人值守运行所需的配置、目录和最近任务状态。"""
+    from contest_trade.config.config import cfg
+    from contest_trade.operations.runtime import HEALTH_PATH, RUNTIME_DIR, read_health
+
+    failures = []
+    warnings = []
+    failures.extend(cfg.runtime_config_errors())
+
+    try:
+        import akshare  # noqa: F401
+    except ImportError:
+        failures.append("AKShare is not installed")
+
+    try:
+        from contest_trade.main import SimpleTradeCompany  # noqa: F401
+    except Exception as exc:
+        failures.append(f"package import failed: {exc}")
+
+    try:
+        RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+        probe = RUNTIME_DIR / ".write_probe"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink()
+    except OSError as exc:
+        failures.append(f"runtime directory is not writable: {exc}")
+
+    health = read_health()
+    if health is None:
+        warnings.append(f"no scheduled run has been recorded at {HEALTH_PATH}")
+    else:
+        status = health.get("status", "unknown")
+        finished_at = health.get("finished_at") or health.get("started_at")
+        if status in {"failed", "invalid"}:
+            failures.append(f"last run status is {status}: {health.get('message', '')}")
+        if finished_at:
+            try:
+                age = datetime.now().astimezone() - datetime.fromisoformat(finished_at)
+                if age.total_seconds() > stale_after_hours * 3600:
+                    warnings.append(
+                        f"last run is stale ({age.total_seconds() / 3600:.1f} hours old)"
+                    )
+            except (TypeError, ValueError):
+                failures.append("last run timestamp is invalid")
+
+    if failures:
+        console.print("[red]UNHEALTHY[/red]")
+        for item in failures:
+            console.print(f"[red]- {item}[/red]")
+    else:
+        console.print("[green]HEALTHY[/green]")
+    for item in warnings:
+        console.print(f"[yellow]- {item}[/yellow]")
+    if health:
+        console.print(
+            f"最近运行: {health.get('status')} | {health.get('finished_at') or health.get('started_at')}"
+        )
+
+    if failures or (strict and warnings):
+        raise typer.Exit(1)
+
 @app.command()
 def version():
     """显示版本信息"""
@@ -963,7 +1100,9 @@ def version():
     try:
         current_version = package_version("ContestTrade")
     except PackageNotFoundError:
-        current_version = "1.1.0"
+        from contest_trade import __version__
+
+        current_version = __version__
     console.print(f"版本: {current_version}")
 
 if __name__ == "__main__":

@@ -9,11 +9,11 @@ from typing import List, Dict, TypedDict
 from langgraph.graph import END, StateGraph
 from langchain_core.runnables import RunnableConfig
 from langchain_core.callbacks import dispatch_custom_event
-from config.config import cfg, PROJECT_ROOT
-from agents.data_analysis_agent import DataAnalysisAgent, DataAnalysisAgentConfig, DataAnalysisAgentInput
-from agents.research_agent import ResearchAgent, ResearchAgentConfig, ResearchAgentInput
-from utils.market_manager import GLOBAL_MARKET_MANAGER
-from utils.signal_aggregator import SignalAggregatorConfig, aggregate_signals
+from contest_trade.config.config import cfg, PROJECT_ROOT
+from contest_trade.agents.data_analysis_agent import DataAnalysisAgent, DataAnalysisAgentConfig, DataAnalysisAgentInput
+from contest_trade.agents.research_agent import ResearchAgent, ResearchAgentConfig, ResearchAgentInput
+from contest_trade.utils.market_manager import GLOBAL_MARKET_MANAGER
+from contest_trade.utils.signal_aggregator import SignalAggregatorConfig, aggregate_signals
 from loguru import logger
 
 # 统一的状态定义
@@ -325,7 +325,7 @@ class SimpleTradeCompany:
         """从 <Output>{JSON}</Output> 提取并解析信号；失败返回 None。
         用 utils.json_signal_parser 统一实现。
         """
-        from utils.json_signal_parser import parse_and_normalize
+        from contest_trade.utils.json_signal_parser import parse_and_normalize
         return parse_and_normalize(output)
 
     @staticmethod

@@ -4,10 +4,10 @@ Data Summary Based On Akshare
 import hashlib
 from pathlib import Path
 from pydantic import BaseModel, Field
-from utils.akshare_utils import akshare_cached
-from models.llm_model import GLOBAL_VISION_LLM
-from tools.tool_utils import smart_tool
-from tools.search_web import search_web
+from contest_trade.utils.akshare_utils import akshare_cached
+from contest_trade.models.llm_model import GLOBAL_VISION_LLM
+from contest_trade.tools.tool_utils import smart_tool
+from contest_trade.tools.search_web import search_web
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta

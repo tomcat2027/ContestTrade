@@ -17,15 +17,15 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from langgraph.graph import StateGraph, END
-from utils.llm_utils import count_tokens
+from contest_trade.utils.llm_utils import count_tokens
 
-from agents.prompts import prompt_for_research_plan, prompt_for_research_choose_tool, prompt_for_research_write_result, prompt_for_research_invest_task, prompt_for_research_invest_output_format
-from models.llm_model import GLOBAL_LLM, GLOBAL_THINKING_LLM
-from tools.tool_utils import ToolManager, ToolManagerConfig
-from config.config import cfg, PROJECT_ROOT
+from contest_trade.agents.prompts import prompt_for_research_plan, prompt_for_research_choose_tool, prompt_for_research_write_result, prompt_for_research_invest_task, prompt_for_research_invest_output_format
+from contest_trade.models.llm_model import GLOBAL_LLM, GLOBAL_THINKING_LLM
+from contest_trade.tools.tool_utils import ToolManager, ToolManagerConfig
+from contest_trade.config.config import cfg, PROJECT_ROOT
 from langchain_core.runnables import RunnableConfig
-from utils.market_manager import GLOBAL_MARKET_MANAGER
-from utils.json_signal_parser import parse_and_normalize as _parse_json_signals
+from contest_trade.utils.market_manager import GLOBAL_MARKET_MANAGER
+from contest_trade.utils.json_signal_parser import parse_and_normalize as _parse_json_signals
 
 @dataclass
 class ResearchAgentInput:
@@ -73,9 +73,11 @@ class ResearchAgentConfig:
         self.max_react_step = cfg.research_agent_config["max_react_step"]
         tool_paths = list(cfg.research_agent_config["tools"])
         if not getattr(cfg, "serp_key", "") and not getattr(cfg, "bocha_key", ""):
-            search_tool = "tools.search_web.search_web"
-            if search_tool in tool_paths:
-                tool_paths.remove(search_tool)
+            search_tools = [
+                path for path in tool_paths if path.endswith(".search_web.search_web")
+            ]
+            if search_tools:
+                tool_paths = [path for path in tool_paths if path not in search_tools]
                 logger.warning(
                     "Search tool disabled because neither SERP_API_KEY nor BOCHA_API_KEY is configured"
                 )

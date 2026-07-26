@@ -7,22 +7,17 @@ It follows an async-first approach, where the primary implementation is the
 asynchronous streaming method (a_stream_run).
 """
 import os
-import sys
 import httpx
 import asyncio
 import time
 import random
 from abc import ABC, abstractmethod
-from pathlib import Path
 from typing import Dict, List, Optional, AsyncIterator, Callable, Any
 from enum import Enum
 from loguru import logger
-PROJECT_ROOT = Path(__file__).parent.parent.resolve()
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.append(str(PROJECT_ROOT))
-from config.config import cfg
+from contest_trade.config.config import cfg
 
-from models.base_agent_model import (
+from contest_trade.models.base_agent_model import (
     BaseAgentModel,
     AsyncResponseStream,
     StreamingChunk,
@@ -720,18 +715,19 @@ except Exception as e:
     print(f"加载thinking模型失败，使用llm模型替代: {e}")
     GLOBAL_THINKING_LLM = GLOBAL_LLM
 
-try:
-    if not cfg.vlm.get("supports_vision", True):
-        raise ValueError("configured VLM does not support image input")
-    vlm_provider = cfg.vlm.get("provider", detect_provider(cfg.vlm["model_name"], cfg.vlm.get("base_url")))
-    GLOBAL_VLM_CONFIG = LLMModelConfig(
-        provider=vlm_provider,
-        model_name=cfg.vlm["model_name"],
-        api_key=cfg.vlm.get("api_key"),
-        base_url=cfg.vlm.get("base_url")
-    )
-    assert GLOBAL_VLM_CONFIG.api_key
-    GLOBAL_VISION_LLM = LLMModel(GLOBAL_VLM_CONFIG)
-except Exception as e:
-    print(f"加载vlm模型失败，vision能力不可用: {e}")
+if not cfg.vlm.get("supports_vision", True):
     GLOBAL_VISION_LLM = None
+else:
+    try:
+        vlm_provider = cfg.vlm.get("provider", detect_provider(cfg.vlm["model_name"], cfg.vlm.get("base_url")))
+        GLOBAL_VLM_CONFIG = LLMModelConfig(
+            provider=vlm_provider,
+            model_name=cfg.vlm["model_name"],
+            api_key=cfg.vlm.get("api_key"),
+            base_url=cfg.vlm.get("base_url")
+        )
+        assert GLOBAL_VLM_CONFIG.api_key
+        GLOBAL_VISION_LLM = LLMModel(GLOBAL_VLM_CONFIG)
+    except Exception as e:
+        logger.warning(f"VLM 初始化失败，图片能力不可用: {e}")
+        GLOBAL_VISION_LLM = None

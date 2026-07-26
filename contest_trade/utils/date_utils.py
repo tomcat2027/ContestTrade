@@ -1,5 +1,5 @@
 from datetime import datetime
-from utils.market_manager import GLOBAL_MARKET_MANAGER
+from contest_trade.utils.market_manager import GLOBAL_MARKET_MANAGER
 
 def get_current_datetime(trigger_time: str) -> str:
     """Get current time"""

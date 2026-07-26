@@ -7,7 +7,7 @@ import hashlib
 from pathlib import Path
 from datetime import datetime
 from loguru import logger
-from utils.cache_io import read_cache, write_cache
+from contest_trade.utils.cache_io import read_cache, write_cache
 
 import akshare as ak
 

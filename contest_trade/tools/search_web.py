@@ -9,8 +9,8 @@ from pydantic import BaseModel, Field
 from langchain_core.tools import tool
 from loguru import logger
 import json
-from config.config import cfg
-from tools.tool_utils import smart_tool
+from contest_trade.config.config import cfg
+from contest_trade.tools.tool_utils import smart_tool
 
 
 def ask_bocha(payload: dict, BOCHA_API_KEY: str) -> list:

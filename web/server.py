@@ -18,6 +18,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 RESULTS_DIR = ROOT.parent / "contest_trade" / "agents_workspace" / "results"
+HEALTH_FILE = ROOT.parent / "contest_trade" / "agents_workspace" / "runtime" / "last_run.json"
 HTML_FILE = ROOT / "index.html"
 HOST = os.environ.get("CONTESTTRADE_WEB_HOST", "127.0.0.1")
 PORT = int(os.environ.get("CONTESTTRADE_WEB_PORT", "8765"))
@@ -63,10 +64,7 @@ def _try_extract_json_signals(content: str):
 
     内部委托给 contest_trade.utils.json_signal_parser 统一实现。
     """
-    import sys
-    from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "contest_trade"))
-    from utils.json_signal_parser import parse_for_web
+    from contest_trade.utils.json_signal_parser import parse_for_web
     return parse_for_web(content)
 
 
@@ -229,10 +227,35 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send_html(HTML)
         elif path == "/api/reports":
             self._list_reports()
+        elif path == "/api/health":
+            self._get_health()
         elif path == "/api/report":
             self._get_report(parsed.query)
         else:
             self._send_json(404, {"error": "not found"})
+
+    def _get_health(self):
+        try:
+            health = json.loads(HEALTH_FILE.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            self._send_json(503, {"status": "unknown", "message": "no run recorded"})
+            return
+        except (OSError, json.JSONDecodeError, TypeError) as exc:
+            self._send_json(503, {"status": "invalid", "message": str(exc)})
+            return
+
+        public_health = {
+            "status": health.get("status", "unknown"),
+            "trigger_time": health.get("trigger_time"),
+            "started_at": health.get("started_at"),
+            "finished_at": health.get("finished_at"),
+            "duration_seconds": health.get("duration_seconds"),
+            "message": health.get("message", ""),
+            "metrics": health.get("metrics", {}),
+            "report_count": len(health.get("reports", {})),
+        }
+        code = 200 if public_health["status"] in {"success", "degraded", "running"} else 503
+        self._send_json(code, public_health)
 
     def _list_reports(self):
         # 缓存策略：目录 mtime 没变就复用缓存，否则重建

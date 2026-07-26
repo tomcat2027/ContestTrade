@@ -11,12 +11,7 @@ from datetime import datetime
 import random
 import html
 import pandas as pd
-import sys
-current_dir = os.path.dirname(__file__)
-package_root = os.path.dirname(current_dir)
-if package_root not in sys.path:
-    sys.path.insert(0, package_root)
-from data_source.data_source_base import DataSourceBase
+from contest_trade.data_source.data_source_base import DataSourceBase
 from loguru import logger
 
 

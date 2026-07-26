@@ -8,10 +8,10 @@ import pandas as pd
 import numpy as np
 from pydantic import BaseModel, Field
 
-from tools.tool_utils import smart_tool
-from utils.akshare_utils import akshare_cached
-from tools.tool_prompts import STOCK_FILTER_PROMPT_AKSHARE
-from models.llm_model import GLOBAL_LLM
+from contest_trade.tools.tool_utils import smart_tool
+from contest_trade.utils.akshare_utils import akshare_cached
+from contest_trade.tools.tool_prompts import STOCK_FILTER_PROMPT_AKSHARE
+from contest_trade.models.llm_model import GLOBAL_LLM
 
 def get_basic_stock_df_akshare(trigger_time: str):    
     try:

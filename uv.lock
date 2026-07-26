@@ -491,8 +491,8 @@ wheels = [
 
 [[package]]
 name = "contesttrade"
-version = "1.1.0"
-source = { virtual = "." }
+version = "1.2.0"
+source = { editable = "." }
 dependencies = [
     { name = "akshare" },
     { name = "crawl4ai" },

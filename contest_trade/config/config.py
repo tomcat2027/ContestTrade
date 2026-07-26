@@ -8,18 +8,24 @@ from dotenv import load_dotenv
 
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 
-# 加载 .env 文件（位于 ContestTrade/ 目录）
-load_dotenv(PROJECT_ROOT.parent / ".env")
-
 
 class ProjectConfig:
 
-    def __init__(self) -> None:
+    def __init__(self, config_path: str | Path | None = None) -> None:
         market_type = 'CN-Stock'
-        config_filename = "config.yaml"
-        
-        yaml_path = PROJECT_ROOT.parent / config_filename
-        print(f"Loading config from: {yaml_path} (Market: {market_type})")
+        configured_path = config_path or os.environ.get("CONTEST_TRADE_CONFIG")
+        yaml_path = Path(configured_path) if configured_path else PROJECT_ROOT.parent / "config.yaml"
+        if not yaml_path.is_absolute():
+            yaml_path = Path.cwd() / yaml_path
+        yaml_path = yaml_path.resolve()
+        if not yaml_path.is_file():
+            raise FileNotFoundError(
+                f"ContestTrade config not found: {yaml_path}; "
+                "set CONTEST_TRADE_CONFIG to an explicit YAML file"
+            )
+
+        load_dotenv(yaml_path.parent / ".env")
+        self.config_path = yaml_path
 
         with open(yaml_path, "r", encoding="utf-8") as fr:
             config = yaml.load(fr, Loader=yaml.FullLoader)

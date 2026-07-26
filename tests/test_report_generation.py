@@ -81,7 +81,7 @@ class ReportGenerationTests(unittest.TestCase):
                 final_state, Path(directory)
             )
         self.assertTrue(markdown_path.name.startswith("final_report_"))
-        self.assertIn("ContestTrade v1.1.0", markdown)
+        self.assertIn("ContestTrade v1.2.0", markdown)
 
     def test_interactive_view_builds_without_writing(self):
         markdown = FinalReportGenerator({"step_results": {}}).build_markdown_report()

@@ -5,8 +5,8 @@ Price Info Tools
 import pandas as pd
 from pydantic import BaseModel, Field
 from datetime import datetime, timedelta
-from utils.akshare_utils import akshare_cached
-from tools.tool_utils import smart_tool
+from contest_trade.utils.akshare_utils import akshare_cached
+from contest_trade.tools.tool_utils import smart_tool
 
 class PriceInfoInput(BaseModel):
     market: str = Field(description="The market of the company.")

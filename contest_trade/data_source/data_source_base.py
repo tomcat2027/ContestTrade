@@ -1,9 +1,9 @@
 import pandas as pd
 import time
-from config.config import PROJECT_ROOT
+from contest_trade.config.config import PROJECT_ROOT
 from pathlib import Path
 from loguru import logger
-from utils.cache_io import read_cache, write_cache
+from contest_trade.utils.cache_io import read_cache, write_cache
 
 class DataSourceBase:
     

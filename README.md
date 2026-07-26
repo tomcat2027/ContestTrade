@@ -50,8 +50,8 @@ cd ContestTrade
 conda create -n contesttrade python=3.10
 conda activate contesttrade
 
-# 3. 安装项目依赖
-pip install -r requirements.txt
+# 3. 安装锁定依赖与 ContestTrade 命令
+uv sync --frozen
 
 ```
 
@@ -111,7 +111,7 @@ pip install -r requirements.txt
 您可以通过命令行界面（CLI）轻松启动ContestTrade。
 
 ```bash
-python -m cli.main run
+uv run contesttrade run
 ```
 
 程序启动后将直接进入 A 股分析，并提示选择具体分析时间。
@@ -133,6 +133,17 @@ python -m cli.main run
 </p>
 
 同时可以进一步选择查看详细的研究报告。
+
+### 长期定时运行
+
+项目支持带防重入锁、总超时、轮转日志和健康状态文件的无人值守运行：
+
+```bash
+uv run contesttrade run --market CN-Stock --silent --timeout-seconds 1800
+uv run contesttrade doctor --strict --stale-after-hours 30
+```
+
+macOS `launchd` 和 Linux cron 的配置见 [无人值守运行指南](docs/operations.md)。
 
 <p align="center">
   <img src="assets/contest_trade_cli_report.jpg" style="width: 100%; height: auto;">

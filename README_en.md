@@ -50,8 +50,8 @@ cd ContestTrade
 conda create -n contesttrade python=3.10
 conda activate contesttrade
 
-# 3. Install project dependencies
-pip install -r requirements.txt
+# 3. Install locked dependencies and the ContestTrade command
+uv sync --frozen
 ```
 
 ## Configuration
@@ -104,7 +104,7 @@ Default configuration:
 You can easily start ContestTrade using the Command Line Interface (CLI).
 
 ```bash
-python -m cli.main run
+uv run contesttrade run
 ```
 
 After the program starts, you will enter the terminal interactive interface and can choose the market you want to analyze. The default analysis time is the current time.
@@ -132,6 +132,18 @@ You can also choose to view a more detailed data analysis report.
 </p>
 
 > All the above reports will be saved in the `contest_trade/agents_workspace/results` directory in Markdown format for your future reference and sharing.
+
+### Scheduled unattended runs
+
+The scheduled command includes a non-overlapping process lock, total timeout,
+rotating logs, and an atomic health record:
+
+```bash
+uv run contesttrade run --market CN-Stock --silent --timeout-seconds 1800
+uv run contesttrade doctor --strict --stale-after-hours 30
+```
+
+See the [operations guide](docs/operations.md) for macOS `launchd` and Linux cron setup.
 
 ## 🌟 Vision & Roadmap
 
