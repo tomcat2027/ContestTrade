@@ -7,7 +7,6 @@ from pydantic import BaseModel, Field
 from utils.tushare_utils import tushare_cached
 from tools.tool_prompts import FINANCIAL_TOOL_SELECT_PROMPT
 from tools.tool_utils import ToolManager, ToolManagerConfig
-from utils.finnhub_utils import finnhub_cached
 from tools.tool_utils import smart_tool
 
 class CompanyFinancialInput(BaseModel):
@@ -78,15 +77,6 @@ async def company_income(market: str, symbol: str, period: str, trigger_time: st
             return df.to_markdown()
         else:
             return {"error": "The period is not in the trigger time."}
-    elif market == "US-Stock":
-        period_date = period[:4] + '-' + period[4:6] + '-' + period[6:8]
-        datas = finnhub_cached.run('financials', {
-            'symbol': symbol,
-            'statement': 'ic',
-            'freq': "quarterly"
-        })['financials']
-        data = [d for d in datas if d['period'] == period_date][0]
-        return data
     else:
         return {"error": "Not supported yet."}
 
@@ -116,15 +106,6 @@ async def company_balance_sheet(market: str, symbol: str, period: str, trigger_t
             return df.to_markdown()
         else:
             return {"error": "The period is not in the trigger time."}
-    elif market == "US-Stock":
-        period_date = period[:4] + '-' + period[4:6] + '-' + period[6:8]
-        datas = finnhub_cached.run('financials', {
-            'symbol': symbol,
-            'statement': 'bs',
-            'freq': "quarterly"
-        })['financials']
-        data = [d for d in datas if d['period'] == period_date][0]
-        return data
     else:
         return {"error": "Not supported yet."}
 
@@ -154,15 +135,6 @@ async def company_cash_flow(market: str, symbol: str, period: str, trigger_time:
             return df.to_markdown()
         else:
             return {"error": "The period is not in the trigger time."}
-    elif market == "US-Stock":
-        period_date = period[:4] + '-' + period[4:6] + '-' + period[6:8]
-        datas = finnhub_cached.run('financials', {
-            'symbol': symbol,
-            'statement': 'cf',
-            'freq': "quarterly"
-        })['financials']
-        data = [d for d in datas if d['period'] == period_date][0]
-        return data
     else:
         return {"error": "Not supported yet."}
 

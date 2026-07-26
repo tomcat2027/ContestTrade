@@ -65,17 +65,6 @@ trading_costs:
     slippage_fixed: 0.01           # 固定滑点金额
     min_shares: 100                # 最小交易单位 100股
   
-  # 美股交易成本配置（可选）
-  US-Stock:
-    type: "us_stock"
-    fee_type: "zero_commission"    # 费用类型: zero_commission/per_trade/per_share
-    commission_per_trade: 0.0      # 每笔交易费用
-    commission_per_share: 0.0      # 每股费用
-    slippage_rate: 0.001           # 滑点率 0.1%
-    slippage_mode: "percentage"    # 滑点模式: percentage/fixed
-    slippage_fixed: 0.01           # 固定滑点金额 ($0.01)
-    min_shares: 1                  # 最小交易单位 1股
-  
   # 港股交易成本配置（可选）
   HK-Stock:
     type: "hk_stock"

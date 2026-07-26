@@ -14,8 +14,6 @@ import os
 
 # --- Imports from project ---
 from utils.tushare_utils import pro_cached
-from utils.fmp_utils import get_us_stock_price, CachedFMPClient
-from utils.finnhub_utils import finnhub_cached
 from utils.date_utils import get_previous_trading_date
 
 # --- Matplotlib Setup for Chinese Characters ---
@@ -103,30 +101,6 @@ def _get_kline_data(stock_code, kline_num, end_date):
         for r in df.to_dict('records')
     ], 'stock_code': stock_code, 'kline_num': len(df)}
 
-def _get_kline_data_us(symbol, kline_num, end_date):
-    df = get_us_stock_price(symbol=symbol, from_date=(datetime.strptime(end_date, '%Y%m%d') - timedelta(days=kline_num * 2)).strftime('%Y-%m-%d'), to_date=datetime.strptime(end_date, '%Y%m%d').strftime('%Y-%m-%d'), adjusted=True, verbose=False)
-    if df is None or df.empty: return None
-    df = df.sort_values('date', ascending=False).head(kline_num).sort_values('date', ascending=True).reset_index(drop=True)
-    # 用 shift(1) 算前收盘价，比 iterrows 快 10 倍
-    prev_close = df['close'].shift(1).fillna(df['close'])
-    kline_data = [
-        {
-            'trade_date': r['date'].strftime('%Y%m%d'),
-            'open_price': float(r['open']),
-            'high_price': float(r['high']),
-            'low_price': float(r['low']),
-            'close_price': float(r['close']),
-            'preclose_price': float(pc),
-            'price_change': float(r['close'] - pc),
-            'price_change_rate': (float(r['close'] - pc) / pc * 100) if pc != 0 else 0,
-            'volume': int(r['volume']),
-            'trade_amount': float(r['volume'] * r['close']),
-            'trade_lots': int(r['volume'])
-        }
-        for r, pc in zip(df.to_dict('records'), prev_close.tolist())
-    ]
-    return {'data': kline_data, 'stock_code': symbol, 'kline_num': len(kline_data)}
-
 def _generate_kline_chart_base64(data, stock_code, stock_name, report_date, currency_symbol="元", volume_unit="手"):
     if not data or 'data' not in data or not data['data']: return None
     df = pd.DataFrame(data['data'])
@@ -189,11 +163,6 @@ def _get_financial_analysis(market, stock_code, stock_name, end_date):
         df = pro_cached.run("fina_indicator", func_kwargs={'ts_code': stock_code, 'start_date': (datetime.strptime(end_date, '%Y%m%d') - timedelta(days=365)).strftime('%Y%m%d'), 'end_date': end_date}, verbose=False)
         if df is None or df.empty: return {'success': False, 'summary': "财务数据暂不可用"}
         return {'success': True, 'summary': _generate_cn_financial_narrative(df.sort_values('end_date', ascending=False).iloc[0].to_dict(), stock_name)}
-    elif market == "US-Stock":
-        basic = finnhub_cached.run('company_basic_financials', {'symbol': stock_code, 'metric': 'all'}, verbose=False)
-        if not basic: return {'success': False, 'summary': f"Failed to fetch financial data for {stock_code}"}
-        reported = finnhub_cached.run('financials_reported', {'symbol': stock_code, 'freq': 'annual'}, verbose=False)
-        return {'success': True, 'summary': _create_us_financial_narrative({'symbol': stock_code, 'basic_metrics': basic, 'financials_reported': reported}, stock_name)}
     return {'success': False, 'summary': f"Market type '{market}' is not supported."}
 
 def _generate_cn_financial_narrative(data, stock_name):
@@ -222,107 +191,6 @@ def _generate_cn_financial_narrative(data, stock_name):
 - 速动比率：{f('quick_ratio')}
 
 报告期：{f('end_date')}，公告日期：{f('ann_date')}"""
-
-def _create_us_financial_narrative(us_financial_result, stock_name):
-    if not us_financial_result:
-        return f"Financial data for {stock_name} is not available."
-    
-    symbol = us_financial_result['symbol']
-    basic_metrics = us_financial_result.get('basic_metrics', {})
-    financials_reported = us_financial_result.get('financials_reported', {})
-    
-    metrics = basic_metrics.get('metric', {})
-    
-    # Get latest financial report data
-    latest_report = {}
-    year = "N/A"
-    if financials_reported and 'data' in financials_reported and financials_reported['data']:
-        latest_data = financials_reported['data'][0]
-        year = latest_data.get('year', 'N/A')
-        report = latest_data.get('report', {})
-        
-        if 'ic' in report:  # Income Statement
-            for item in report['ic']:
-                concept = item.get('concept', '').replace('us-gaap_', '')
-                latest_report[concept] = item.get('value', 0)
-        if 'bs' in report:  # Balance Sheet
-            for item in report['bs']:
-                concept = item.get('concept', '').replace('us-gaap_', '')
-                latest_report[concept] = item.get('value', 0)
-    
-    def safe_get_value(key, default="N/A"):
-        value = metrics.get(key)
-        if value is None or pd.isna(value):
-            return default
-        return value
-    
-    def format_percentage(value):
-        if value is None or pd.isna(value):
-            return "N/A"
-        try:
-            return f"{float(value):.2f}%"
-        except (ValueError, TypeError):
-            return str(value)
-    
-    def format_number(value, decimal_places=2):
-        if value is None or pd.isna(value):
-            return "N/A"
-        try:
-            return f"{float(value):.{decimal_places}f}"
-        except (ValueError, TypeError):
-            return str(value)
-    
-    def format_large_number(value):
-        if value is None or pd.isna(value):
-            return "N/A"
-        try:
-            value_float = float(value)
-            if value_float >= 1000000000:  # Billions
-                return f"${value_float/1000000000:.2f}B"
-            elif value_float >= 1000000:  # Millions
-                return f"${value_float/1000000:.2f}M"
-            else:
-                return f"${value_float:,.2f}"
-        except (ValueError, TypeError):
-            return str(value)
-    
-    # Build English narrative
-    narrative = f"""
-{stock_name} ({symbol}) Financial Analysis (Latest Report Year: {year}):
-
-PROFITABILITY ANALYSIS:
-- Earnings Per Share (Diluted): {format_number(latest_report.get('EarningsPerShareDiluted', metrics.get('epsInclExtraItemsTTM')))}
-- Return on Equity (ROE): {format_percentage(safe_get_value('roeTTM'))}
-- Return on Assets (ROA): {format_percentage(safe_get_value('roaTTM'))}
-- Gross Margin: {format_percentage(safe_get_value('grossMarginTTM'))}
-- Net Margin: {format_percentage(safe_get_value('netProfitMarginTTM'))}
-
-GROWTH ANALYSIS:
-- Revenue Growth (TTM YoY): {format_percentage(safe_get_value('revenueGrowthTTMYoy'))}
-- EPS Growth (TTM YoY): {format_percentage(safe_get_value('epsGrowthTTMYoy'))}
-
-PER SHARE METRICS:
-- Book Value Per Share: {format_number(safe_get_value('bookValuePerShareAnnual'))}
-- Revenue Per Share: {format_number(safe_get_value('salesPerShareTTM'))}
-- Cash Per Share: {format_number(safe_get_value('cashPerSharePerShareTTM'))}
-
-DEBT & LIQUIDITY ANALYSIS:
-- Current Ratio: {format_number(safe_get_value('currentRatioAnnual'))}
-- Quick Ratio: {format_number(safe_get_value('quickRatioAnnual'))}
-- Debt to Equity: {format_number(safe_get_value('totalDebtToEquityAnnual'))}
-
-VALUATION METRICS:
-- P/E Ratio (TTM): {format_number(safe_get_value('peInclExtraTTM'))}
-- P/B Ratio: {format_number(safe_get_value('pbAnnual'))}
-- Price to Sales: {format_number(safe_get_value('psAnnual'))}
-
-KEY FINANCIAL FIGURES:
-- Total Revenue: {format_large_number(latest_report.get('RevenueFromContractWithCustomerExcludingAssessedTax'))}
-- Net Income: {format_large_number(latest_report.get('NetIncomeLoss'))}
-- Total Assets: {format_large_number(latest_report.get('Assets'))}
-- Total Equity: {format_large_number(latest_report.get('StockholdersEquity'))}"""
-
-    return narrative.strip()
 
 #==============================================================================
 # OTHER CN-DATA FUNCTIONS (1:1 with originals, BUG FIXED)
@@ -469,20 +337,5 @@ def get_all_stock_data(market, symbol, stock_name, trigger_time):
             results["technical_analysis"] = _generate_technical_narrative(tech_res['factor_result'], stock_name)
             print(f"✅  技术面因子数据获取成功")
         else: print(f"❌  技术面因子数据获取失败: {tech_res['message']}")
-
-    elif market == "US-Stock":
-        results["intraday_description"] = f"美股({symbol})暂不支持分时数据"
-        kline_data = _get_kline_data_us(symbol, 90, previous_trading_date)
-        if kline_data and kline_data.get('data'):
-            results["kline_chart_base64"] = _generate_kline_chart_base64(kline_data, symbol, stock_name, previous_trading_date, "$", "share")
-            results["kline_description"] = _describe_kline_data(kline_data, "$", "share", "k$")
-            print(f"✅  K线数据获取成功, 共{len(kline_data['data'])}条记录，图表已生成")
-        else: print(f"❌  K线数据获取失败")
-
-        fin_res = _get_financial_analysis(market, symbol, stock_name, previous_trading_date)
-        if fin_res['success']:
-            results["financial_summary"] = fin_res['summary']
-            print(f"✅  财务数据获取成功")
-        else: print(f"❌  财务数据获取失败: {fin_res.get('summary')}")
 
     return results

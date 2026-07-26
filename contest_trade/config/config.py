@@ -15,14 +15,8 @@ load_dotenv(PROJECT_ROOT.parent / ".env")
 class ProjectConfig:
 
     def __init__(self) -> None:
-        # Get market type from environment variable, default to CN-Stock
-        market_type = os.environ.get('CONTEST_TRADE_MARKET', 'CN-Stock')
-        
-        # Choose config file based on market type
-        if market_type == 'US-Stock':
-            config_filename = "config_us.yaml"
-        else:
-            config_filename = "config.yaml"
+        market_type = 'CN-Stock'
+        config_filename = "config.yaml"
         
         yaml_path = PROJECT_ROOT.parent / config_filename
         print(f"Loading config from: {yaml_path} (Market: {market_type})")
@@ -96,10 +90,6 @@ class ProjectConfig:
             ("TUSHARE_KEY",        "tushare_key"),
             ("BOCHA_API_KEY",      "bocha_key"),
             ("SERP_API_KEY",       "serp_key"),
-            ("FMP_KEY",            "fmp_key"),
-            ("FINNHUB_KEY",        "finnhub_key"),
-            ("POLYGON_KEY",        "polygon_key"),
-            ("ALPHA_VANTAGE_KEY",  "alpha_vantage_key"),
         ]
         for env_name, attr in _SINGLE_KEY_OVERRIDES:
             val = os.environ.get(env_name)

@@ -14,7 +14,7 @@ from utils.market_manager import GLOBAL_MARKET_MANAGER
 from tools.tool_utils import smart_tool
 
 class StockSymbolSearchInput(BaseModel):
-    market: str = Field(description="The target market. e.g., CN-Stock, US-Stock, HK-Stock, CN-ETF")
+    market: str = Field(description="The target market, such as CN-Stock, CN-ETF, or HK-Stock")
     queries: List[str] = Field(description="List of search queries: company names or stock symbols (partial match supported)")
     trigger_time: str = Field(description="The trigger time. Format: YYYY-MM-DD HH:MM:SS")
     limit_per_query: int = Field(default=5, description="Maximum number of results per query")

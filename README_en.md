@@ -63,17 +63,13 @@ docker run -it --rm --name contest_trade -v $(pwd)/config.yaml:/ContestTrade/con
 
 Before running ContestTrade, you need to configure the necessary API keys and LLM parameters.
 
-Edit the `config_us.yaml` file and enter your API keys. The table below lists all required and optional keys:
+Edit `config.yaml` and enter your API keys. ContestTrade currently supports the China A-share market only.
 
 | Key                      | Description                                | Required |
 | :----------------------- | :----------------------------------------- | :------- |
 | `TUSHARE_KEY`            | Tushare data interface key                 | No       |
 | `BOCHA_KEY`              | Bocha search engine key                    | No       |
 | `SERP_KEY`               | SerpAPI search engine key                  | No       |
-| `FMP_KEY`                | FMP API key                                | **Yes**  |
-| `FINNHUB_KEY`            | Finnhub API key                            | No       |
-| `ALPHA_VANTAGE_KEY`      | Alpha Vantage API key                      | **Yes** |
-| `POLYGON_KEY`            | Polygon API key                            | **Yes** |
 | `LLM_API_KEY`            | LLM API key for general tasks              | **Yes** |
 | `LLM_BASE_URL`           | LLM API base URL for general tasks         | **Yes** |
 | `LLM_THINKING_API_KEY`   | LLM API key for complex reasoning          | No       |
@@ -156,7 +152,6 @@ The project is dedicated to developing more robust infrastructure and a wider va
 - [✓] Optimized CLI logging and interaction experience.
 
 **V2.0 (Finished): Market and Function Expansion**
-- [✓] Access to **US stock** market data.
 - [✓] Introduced richer factors and signal sources.
 
 **Future Plans:**

@@ -28,12 +28,11 @@ console = Console()
 
 def get_text(cn_text: str, en_text: str) -> str:
     """根据市场类型返回对应语言的文本"""
-    market_type = os.environ.get('CONTEST_TRADE_MARKET', 'CN-Stock')
-    return en_text if market_type == 'US-Stock' else cn_text
+    return cn_text
 
 app = typer.Typer(
     name="contesttrade",
-    help="ContestTrade: 基于内部竞赛机制的Multi-Agent交易系统 (支持A股和美股)",
+    help="ContestTrade: 基于内部竞赛机制的 A 股 Multi-Agent 交易系统",
     add_completion=True,
 )
 
@@ -914,7 +913,7 @@ def display_detailed_report(final_state: Dict):
 
 @app.command()
 def run(
-    market: Optional[str] = typer.Option(None, "--market", "-m", help="选择市场 (CN-Stock/US-Stock)"),
+    market: Optional[str] = typer.Option("CN-Stock", "--market", "-m", help="市场（仅支持 CN-Stock）"),
     silent: bool = typer.Option(False, "--silent", "-s", help="静默模式，无交互确认，直接运行"),
 ):
     """运行ContestTrade分析"""
@@ -932,8 +931,8 @@ def run(
         console.print("[red]未提供市场选择[/red]")
         raise typer.Exit(1)
 
-    if market not in ["CN-Stock", "US-Stock"]:
-        console.print("[red]市场选择错误，请选择 CN-Stock 或 US-Stock[/red]")
+    if market != "CN-Stock":
+        console.print("[red]当前仅支持 CN-Stock[/red]")
         raise typer.Exit(1)
 
     # 设置环境变量 - 这样全局的 cfg 就会读取对应的配置
@@ -1016,15 +1015,8 @@ def run(
         if isinstance(result, tuple):
             final_state, action = result
             if action == "new_analysis":
-                # 重新选择市场
-                market = get_market_selection()
-                if not market:
-                    break
-
-                # 设置环境变量
-                os.environ['CONTEST_TRADE_MARKET'] = market
-
-                # 获取新的触发时间
+                # 启动新的 A 股分析
+                market = "CN-Stock"
                 trigger_time = get_trigger_time_for_market(market)
                 if not trigger_time:
                     console.print("[red]无法获取对应市场的触发时间[/red]")

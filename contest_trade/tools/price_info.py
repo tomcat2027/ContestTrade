@@ -24,7 +24,7 @@ async def price_info(market: str, symbol: str, trigger_time: str=None) -> str:
     start_date = (datetime.strptime(triggle_date, "%Y%m%d") - timedelta(days=30)).strftime("%Y%m%d")
     end_date = (datetime.strptime(triggle_date, "%Y%m%d") - timedelta(days=1)).strftime("%Y%m%d")
     
-    if market in ["CN-Stock", "US-Stock", "CSI300", "CSI500", "CSI1000"]:
+    if market in ["CN-Stock", "CSI300", "CSI500", "CSI1000"]:
         # recent K line info
         try:
             df = GLOBAL_MARKET_MANAGER.get_symbol_history_price(market, symbol, start_date, end_date)
@@ -39,11 +39,5 @@ if __name__ == "__main__":
     result = asyncio.run(price_info.ainvoke(
         { "market": "CN-Stock", 
          "symbol": "600519.SH", 
-         "trigger_time": "2025-07-09 15:00:00"}))
-    print(result)
-
-    result = asyncio.run(price_info.ainvoke(
-        { "market": "US-Stock", 
-         "symbol": "TSLA", 
          "trigger_time": "2025-07-09 15:00:00"}))
     print(result)

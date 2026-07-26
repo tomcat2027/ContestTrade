@@ -7,12 +7,6 @@ bocha_key: ""
 #YOUR_SERP_KEY
 serp_key: "" 
 
-#YOUR_FMP_KEY
-fmp_key: "" 
-
-#YOUR_FINNHUB_KEY
-finnhub_key: "" 
-
 # ==================================================
 # LLM 配置说明 / LLM Configuration
 # ==================================================

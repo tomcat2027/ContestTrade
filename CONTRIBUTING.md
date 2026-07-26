@@ -83,7 +83,7 @@ ContestTrade 是一个由社区驱动的开源项目，我们相信，正是社�
 ## 🚀 Pull Request 流程
 
 1.  **创建特性分支：** 从 `dev` 分支创建一个新的特性分支。请遵循清晰的命名规范，例如：
-    * 新功能: `feat/add-us-stock-support`
+    * 新功能: `feat/add-new-data-source`
     * 修复Bug: `fix/tushare-api-error`
     * 文档: `docs/update-contributing-guide`
     ```bash
@@ -93,7 +93,7 @@ ContestTrade 是一个由社区驱动的开源项目，我们相信，正是社�
 3.  **提交代码：** 使用清晰、规范的 Commit Message。我们推荐使用 [Conventional Commits](https://www.conventionalcommits.org/) 格式。
     ```bash
     git add .
-    git commit -m "feat: Add support for US stock market data"
+    git commit -m "feat: Add a new market data source"
     ```
 4.  **推送至您的 Fork 仓库：**
     ```bash

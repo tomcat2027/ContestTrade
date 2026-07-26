@@ -150,7 +150,7 @@ Your output format should be like this, enclosed by <Output> and </Output>:
 
 format_for_symbol_retrieval = """
 <stock>
-<market>xxx</market>   # market name, e.g. "CN-Stock", "CN-ETF", "HK-Stock", "US-Stock"
+<market>xxx</market>   # market name, e.g. "CN-Stock", "CN-ETF", "HK-Stock"
 <code>xxx</code>
 <name>xxx</name>
 <reason>xxx</reason>

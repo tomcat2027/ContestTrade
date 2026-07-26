@@ -5,7 +5,6 @@ tushare
 loguru
 openai
 tiktoken
-finnhub-python
 typer
 pydantic
 questionary

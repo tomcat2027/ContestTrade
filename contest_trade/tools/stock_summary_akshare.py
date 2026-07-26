@@ -45,9 +45,6 @@ def get_stock_name_by_code(symbol, market):
                     # Fallback to second column as name if schema differs
                     return match.iloc[0][1]
             return symbol
-        elif market == "US-Stock":
-            # Keep simple fallback for US; extend via Akshare if needed
-            return symbol
         else:
             return symbol
     except Exception:
@@ -198,7 +195,7 @@ async def call_llm_for_comprehensive_analysis(prompt, intraday_chart_base64=None
 
 class StockSummaryInput(BaseModel):
     market: str = Field(description="The market of the company.")
-    symbol: str = Field(description="The symbol of the company. For CN-Stock use format like '600519.SH', for US-Stock use format like 'AAPL'.")
+    symbol: str = Field(description="The A-share symbol, such as '600519.SH'.")
     trigger_time: str = Field(description="The trigger time of the financial data. Format: YYYY-MM-DD HH:MM:SS.")
 
 
@@ -235,9 +232,6 @@ async def analyze_stock_basic_info(market, symbol, stock_name, trigger_time):
 3. 标注关键支撑/阻力位与潜在风险
 4. 说明数据局限性（仅技术面、财务/资金面未接入）
 """
-    if market == "US-Stock":
-        prompt_template += "\n\n请用英文输出美股分析报告"
-
     print("🤖  Starting LLM technical analysis...")
     try:
         analysis_result = await call_llm_for_comprehensive_analysis(

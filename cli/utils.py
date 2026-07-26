@@ -12,8 +12,6 @@ def get_trigger_time() -> str:
     now = datetime.now()
     time_options = [
         f"A股当前时间 ({now.strftime('%Y-%m-%d %H:%M:%S')})",
-        # f"今天美股盘前 ({now.strftime('%Y-%m-%d')} 15:30:00，夏令时美东时间03:30:00)",
-        # f"今天美股盘前 ({now.strftime('%Y-%m-%d')} 16:30:00，冬令时美东时间04:30:00)"
     ]
     
     time_choice = questionary.select(
@@ -153,33 +151,8 @@ def extract_signal_info(signal: Dict) -> Dict:
     }
 
 def get_market_selection() -> str:
-    """获取用户市场选择 - 使用箭头键选择"""
-    market_options = [
-        "CN-Stock (A股市场)",
-        "US-Stock (美股市场)"
-    ]
-    
-    market_choice = questionary.select(
-        "请选择要分析的市场(Please select a market to analyze):",
-        choices=market_options,
-        style=questionary.Style([
-            ("text", "fg:white"),
-            ("highlighted", "fg:green bold"),
-            ("pointer", "fg:green"),
-        ])
-    ).ask()
-    
-    # 如果用户取消选择
-    if market_choice is None:
-        return None
-    
-    # 根据选择返回对应的市场代码
-    if market_choice == market_options[0]:
-        return "CN-Stock"
-    elif market_choice == market_options[1]:
-        return "US-Stock"
-    else:
-        return None
+    """项目仅支持 A 股市场。"""
+    return "CN-Stock"
 
 def get_trigger_time_for_market(market: str, silent: bool = False) -> str:
     """根据市场获取对应的触发时间，并设置环境变量"""
@@ -187,47 +160,8 @@ def get_trigger_time_for_market(market: str, silent: bool = False) -> str:
     os.environ['CONTEST_TRADE_MARKET'] = market
 
     # 根据市场获取触发时间
-    if market == "CN-Stock":
-        # A股市场使用当前交易日
-        if silent:
-            # 静默模式：直接使用当前时间
-            return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        else:
-            return get_trigger_time()
-    elif market == "US-Stock":
-        # 美股市场使用美东时区时间
-        from datetime import timezone, timedelta
-
-        try:
-            # 尝试使用 pytz 获取美东时区
-            import pytz
-            eastern_tz = pytz.timezone('America/New_York')
-            now = datetime.now(eastern_tz)
-            if not silent:
-                console.print(f"🇺🇸 [cyan]使用美东时区: {now.strftime('%Y-%m-%d %H:%M:%S %Z')}[/cyan]")
-        except ImportError:
-            # 如果没有 pytz，使用简单的时区计算（考虑夏令时）
-            import time
-
-            # 检查是否为夏令时（简化版本：3月第二个周日到11月第一个周日）
-            now_utc = datetime.now(timezone.utc)
-            is_dst = time.daylight and time.localtime().tm_isdst > 0
-
-            if is_dst:
-                # 夏令时 EDT = UTC-4
-                offset_hours = -4
-                tz_name = "EDT"
-            else:
-                # 标准时间 EST = UTC-5
-                offset_hours = -5
-                tz_name = "EST"
-
-            eastern_tz = timezone(timedelta(hours=offset_hours))
-            now = now_utc.astimezone(eastern_tz)
-            if not silent:
-                console.print(f"🇺🇸 [cyan]使用美东时区: {now.strftime('%Y-%m-%d %H:%M:%S')} {tz_name}[/cyan]")
-
-        return now.strftime("%Y-%m-%d %H:%M:%S")
-    else:
+    if market != "CN-Stock":
         return None
-
+    if silent:
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return get_trigger_time()

@@ -6,7 +6,6 @@ from pydantic import BaseModel, Field
 
 # --- Imports from project ---
 from utils.tushare_utils import pro_cached
-from utils.fmp_utils import CachedFMPClient
 from models.llm_model import GLOBAL_VISION_LLM
 from tools.search_web import search_web
 from utils.stock_data_provider import get_all_stock_data
@@ -19,7 +18,7 @@ TOOL_CACHE = TOOL_HOME / "stock_basic_info_cache"
 # --- Pydantic Models ---
 class StockSummaryInput(BaseModel):
     market: str = Field(description="The market of the company.")
-    symbol: str = Field(description="The symbol of the company. For CN-Stock use format like '600519.SH', for US-Stock use format like 'AAPL'.")
+    symbol: str = Field(description="The A-share symbol, such as '600519.SH'.")
     trigger_time: str = Field(description="The trigger time of the financial data. Format: YYYY-MM-DD HH:MM:SS.")
 
 # --- Helper Functions ---
@@ -28,13 +27,6 @@ def get_stock_name_by_code(symbol, market):
     if market == "CN-Stock":
         df = pro_cached.run("stock_basic", func_kwargs={'ts_code': symbol, 'fields': 'ts_code,name'}, verbose=False)
         return df.iloc[0]['name'] if df is not None and not df.empty else symbol
-    elif market == "US-Stock":
-        try:
-            fmp_client = CachedFMPClient()
-            profile_data = fmp_client.run(f'profile/{symbol}', {})
-            return profile_data[0].get('companyName', symbol) if profile_data else symbol
-        except Exception:
-            return symbol
     return symbol
 
 async def call_llm_for_comprehensive_analysis(prompt, intraday_chart_base64=None, kline_chart_base64=None):
@@ -130,9 +122,6 @@ async def analyze_stock_basic_info(market, symbol, stock_name, trigger_time):
 - 图表：充分结合分时图和K线图进行分析
 - 避免：投资建议、主观判断、冗余信息
 """
-    if market == "US-Stock":
-        prompt_template += "\n\n请用英文输出美股分析报告"
-
     # 4. Call LLM for analysis
     print("🤖  Starting LLM comprehensive analysis...")
     try:
@@ -148,14 +137,14 @@ async def analyze_stock_basic_info(market, symbol, stock_name, trigger_time):
 
 # --- Tool Definition ---
 @smart_tool(
-    description="Get stock summerized info.股票基本信息综合分析工具。输入市场、股票代码、触发时间，返回多维度数据总结结果。股票代码格式：A股使用600519.SH格式，美股使用AAPL格式。所有图片仅在内存生成并base64传递，不保存任何中间文件。终端只输出分析状态和最终结果。分析维度包括：1. 分时走势分析 2. K线技术分析 3. 财务基本面分析 4. 所在板块资金流向 5. 个股资金流向（近三日） 6. 技术面因子分析 7. 相关新闻与事件",
+    description="A股基本信息综合分析工具。输入股票代码和触发时间，返回技术面、基本面、资金面和新闻事件总结。",
     args_schema=StockSummaryInput,
     max_output_len=4000,
     timeout_seconds=120.0
 )
 async def stock_summary(market: str, symbol: str, trigger_time: str) -> str:
     """New version of the stock summary tool with refactored logic."""
-    if market not in ["CN-Stock", "US-Stock"]:
+    if market != "CN-Stock":
         return f"错误：不支持的市场类型 '{market}'。"
 
     if not TOOL_CACHE.exists():

@@ -6,6 +6,9 @@ import os
 import json
 from datetime import datetime
 from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]  # cli/static → cli → 项目根
+from pathlib import Path
 from typing import Dict, List
 from rich.console import Console
 from rich.panel import Panel
@@ -27,7 +30,7 @@ class DataReportGenerator:
         self.market_type = os.environ.get('CONTEST_TRADE_MARKET', 'CN-Stock')
         
     def get_text(self, cn_text: str, en_text: str) -> str:
-        return en_text if self.market_type == 'US-Stock' else cn_text
+        return cn_text
         
     def generate_markdown_report(self, save_path: Path) -> str:
         """生成数据报告的Markdown格式"""
@@ -160,7 +163,7 @@ class FinalReportGenerator:
         self.market_type = os.environ.get('CONTEST_TRADE_MARKET', 'CN-Stock')
         
     def get_text(self, cn_text: str, en_text: str) -> str:
-        return en_text if self.market_type == 'US-Stock' else cn_text
+        return cn_text
         
     def generate_markdown_report(self, save_path: Path) -> str:
         """生成Markdown格式的报告"""
@@ -454,25 +457,95 @@ def generate_final_report_json(final_state: Dict, results_dir: Path) -> Path:
     signal_rate = f"{len(valid_signals)/len(best_signals)*100:.1f}% ({len(valid_signals)}/{len(best_signals)})" if len(best_signals) > 0 else "0% (0/0)"
 
     # 转换信号为 web 友好的格式（直接对应 web 渲染需要的字段）
+    # 同时按 agent 分组，前端可以按 belief 风格分块展示，不糅在一起
+    belief_list_path = PROJECT_ROOT / "contest_trade" / "config" / "belief_list.json"
+    beliefs = []
+    if belief_list_path.exists():
+        try:
+            beliefs = json.loads(belief_list_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            beliefs = []
+
+    def _belief_summary(belief_text: str) -> str:
+        """从 belief 文本里抽一段风格摘要。
+
+        策略：找第一个风格关键词（激进/防御/稳健/风险偏好），
+        截到下一个"群体2"/"；"/"。"之前。
+        """
+        if not belief_text:
+            return ""
+        for keyword in ["激进", "防御", "稳健", "风险偏好"]:
+            idx = belief_text.find(keyword)
+            if idx < 0:
+                continue
+            # 往前推到 "群体1:" 或 "为"
+            start = 0
+            for prefix in ["群体1：", "群体1:", "为", "推荐"]:
+                p_idx = belief_text.rfind(prefix, 0, idx)
+                if p_idx >= 0 and p_idx > start:
+                    start = p_idx
+                    break
+            snippet = belief_text[start:]
+            offset = idx - start + 1
+            for sep in ["群体2", "；", "。"]:
+                s_idx = snippet.find(sep, offset)
+                if s_idx > 0:
+                    snippet = snippet[:s_idx]
+                    break
+            snippet = snippet.strip(" ：:;。,")
+            if snippet:
+                return snippet[:80]
+        return belief_text[:60] + ("…" if len(belief_text) > 60 else "")
+
     json_signals = []
+    by_agent = {}  # agent_name -> {belief, belief_summary, signals: [...]}
     for s in valid_signals:
-        # 兼容 XML 旧格式的字段名（time/from_source）和 JSON 新格式（description）
+        agent_name = s.get("agent_name", s.get("agent", "unknown"))
+        # 兼容旧格式 agent_id 数字 → agent_N
+        if isinstance(agent_name, int) or (isinstance(agent_name, str) and agent_name.isdigit()):
+            agent_name = f"agent_{agent_name}"
+
+        # 找该 agent 对应的 belief
+        belief_idx = None
+        if agent_name.startswith("agent_"):
+            try:
+                belief_idx = int(agent_name.split("_")[1])
+            except (ValueError, IndexError):
+                belief_idx = None
+        belief_text = beliefs[belief_idx] if belief_idx is not None and 0 <= belief_idx < len(beliefs) else ""
+
+        # 兼容 XML 旧格式 + JSON 新格式
         evidences = s.get('evidence_list', [])
-        json_evidences = []
-        for e in evidences:
-            json_evidences.append({
+        json_evidences = [
+            {
                 "text": e.get("description", e.get("text", "")),
                 "source": e.get("from_source", e.get("source", "")),
                 "time": e.get("time", ""),
-            })
-        json_signals.append({
+            }
+            for e in evidences
+        ]
+        sig = {
             "name": s.get("symbol_name", ""),
             "code": s.get("symbol_code", ""),
             "action": s.get("action", "buy"),
-            "agent": s.get("agent_name", s.get("agent", f"Research Agent {s.get('agent_id', '?')}")) ,
+            "agent": agent_name,
             "evidence": json_evidences,
             "risks": s.get("limitations", s.get("risks", [])),
-        })
+        }
+        json_signals.append(sig)
+
+        # 写入分组
+        if agent_name not in by_agent:
+            by_agent[agent_name] = {
+                "agent": agent_name,
+                "belief": belief_text,
+                "belief_summary": _belief_summary(belief_text),
+                "signals": [],
+            }
+        by_agent[agent_name]["signals"].append(sig)
+
+    # 排序 by_agent（按 agent 名稳定顺序）
+    by_agent_list = [by_agent[k] for k in sorted(by_agent.keys())]
 
     json_payload = {
         "trigger_time": trigger_time,
@@ -484,6 +557,7 @@ def generate_final_report_json(final_state: Dict, results_dir: Path) -> Path:
             "valid_rate": signal_rate,
         },
         "signals": json_signals,
+        "by_agent": by_agent_list,
         "invalid_signals_count": len(invalid_signals),
         "elapsed": {
             "data_team": data_team.get("elapsed_seconds", 0),

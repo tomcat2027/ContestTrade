@@ -15,7 +15,7 @@
 
 # ContestTrade: A Multi-Agent Trading System Based on Internal Contest Mechanism
 
-**ContestTrade** 是一个创新的多智能体（Multi-Agent）交易框架，通过**ContestTrade** 您可以轻松的打造一支专属的AI交易团队。只需设定分析时刻，它能在无人工干预的情况下自主扫描全市场，从海量数据中挖掘潜在事件驱动型的投资机会，并通过内部优选机制，为您构建最值得信赖的投资组合。
+**ContestTrade** 是一个面向 A 股的多智能体（Multi-Agent）交易框架。只需设定分析时刻，它能在无人工干预的情况下扫描市场，从海量数据中挖掘潜在事件驱动型投资机会，并通过内部优选机制生成投资组合。
 
 ## Introduction (项目简介)
 
@@ -120,13 +120,7 @@ docker run -it --rm --name contest_trade -v $(pwd)/config.yaml:/ContestTrade/con
 python -m cli.main run
 ```
 
-程序启动后，您将进入终端交互式界面，可以选择您要分析的市场。
-
-<p align="center">
-  <img src="assets/contest_trade_cli_select_market.jpg" style="width: 100%; height: auto;">
-</p>
-
-然后，您可以选择具体分析时间。
+程序启动后将直接进入 A 股分析，并提示选择具体分析时间。
 
 <p align="center">
   <img src="assets/contest_trade_cli_start.jpg" style="width: 100%; height: auto;">
@@ -175,9 +169,8 @@ python -m cli.main run
 - [✓] 核心数据源模块解耦，实现多数据源的adaptor (`data-provider` refactor)
 - [✓] 优化CLI日志与交互体验
 
-**V2.0 (已完成): 市场与功能拓展**
+**V2.0 (已完成): 功能拓展**
 
-- [✓] 接入 **美股** 市场数据
 - [✓] 引入更丰富的因子与信号来源
 
 **未来规划:**

@@ -27,7 +27,6 @@ from pathlib import Path
 from dataclasses import dataclass
 from loguru import logger
 from utils.tushare_utils import pro_cached
-from utils.fmp_utils import get_us_stock_price, fmp_cached
 from config.config import cfg
 
 class Market(Enum):
@@ -35,7 +34,6 @@ class Market(Enum):
     A_ALL = "CN-Stock"    # A股全量
     A_ETF = "CN-ETF"    # A股ETF
     HK = "HK-Stock"          # H股/港股
-    US = "US-Stock"          # 美股
     CSI300 = "CSI300"        # 沪深300
     CSI500 = "CSI500"        # 中证500
     CSI1000 = "CSI1000"      # 中证1000
@@ -64,17 +62,6 @@ class ETFTradingConfig(TradingCostConfig):
     commission_min: float = 5.0          # 最低佣金 5元
     stamp_tax_rate: float = 0.001        # 印花税 千1 (仅卖出)
     transfer_fee_rate: float = 0.00002   # 过户费 万0.2
-
-@dataclass
-class USStockTradingConfig(TradingCostConfig):
-    """美股交易成本配置"""
-    fee_type: str = "zero_commission"    # "per_trade", "per_share", "zero_commission"
-    commission_per_trade: float = 0.0    # 每笔交易费用
-    commission_per_share: float = 0.0    # 每股费用
-    slippage_rate: float = 0.001         # 滑点率 0.1%
-    slippage_mode: str = "percentage"    # "percentage" 或 "fixed"
-    slippage_fixed: float = 0.01         # 固定滑点金额 ($0.01)
-    min_shares: int = 1                  # 最小交易单位 1股
 
 @dataclass
 class HKStockTradingConfig(TradingCostConfig):
@@ -140,16 +127,6 @@ class MarketManagerConfig:
                     slippage_mode=cost_config.get('slippage_mode', 'percentage'),
                     slippage_fixed=cost_config.get('slippage_fixed', 0.01),
                     min_shares=cost_config.get('min_shares', 100)
-                )
-            elif config_type == 'us_stock':
-                trading_configs[market_name] = USStockTradingConfig(
-                    fee_type=cost_config.get('fee_type', 'zero_commission'),
-                    commission_per_trade=cost_config.get('commission_per_trade', 0.0),
-                    commission_per_share=cost_config.get('commission_per_share', 0.0),
-                    slippage_rate=cost_config.get('slippage_rate', 0.001),
-                    slippage_mode=cost_config.get('slippage_mode', 'percentage'),
-                    slippage_fixed=cost_config.get('slippage_fixed', 0.01),
-                    min_shares=cost_config.get('min_shares', 1)
                 )
             elif config_type == 'hk_stock':
                 trading_configs[market_name] = HKStockTradingConfig(
@@ -230,8 +207,8 @@ class MarketManager:
         """根据股票代码获取股票名称
         
         Args:
-            symbol (str): 股票代码，A股格式如600519.SH，美股格式如AAPL
-            market (str): 市场类型，CN-Stock或US-Stock
+            symbol (str): 股票代码，A股格式如600519.SH
+            market (str): 市场类型，如 CN-Stock
         
         Returns:
             str: 股票名称，获取失败时返回原symbol
@@ -249,24 +226,6 @@ class MarketManager:
                 
             stock_name = df.iloc[0]['name']
             return stock_name
-        elif market == "US-Stock":
-            # 优先使用缓存查询美股名称
-            try:
-                us_cache = self._get_us_stock_basic_cache()
-                if us_cache is not None and not us_cache.empty:
-                    match = us_cache[us_cache['ts_code'] == symbol]
-                    if not match.empty:
-                        return match.iloc[0]['name']
-                
-                # Fallback to FMP API if cache miss
-                profile_data = fmp_cached.run(f'profile/{symbol}', {})
-                if profile_data and len(profile_data) > 0:
-                    company_name = profile_data[0].get('companyName', symbol)
-                    return company_name
-                else:
-                    return symbol
-            except Exception as e:
-                return symbol
         else:
             raise ValueError(f"不支持的市场类型: {market}")
 
@@ -290,7 +249,6 @@ class MarketManager:
             Market.A_ALL: ("CN-Stock", "All symbols in Chinese mainland stock market. ~5000+ A-shares", ["000001.SZ", "600519.SH", "000858.SZ"]),
             Market.A_ETF: ("CN-ETF", "All symbols in Chinese mainland ETF market. ~300+ A-share ETFs", ["510300.SH", "159919.SZ", "512880.SH"]),
             Market.HK: ("HK-Stock", "All symbols in Hong Kong stock market. ~2000+ HK stocks", ["00700.HK", "09988.HK", "01299.HK"]),
-            Market.US: ("US-Stock", "All symbols in US stock market. ~8000+ US stocks", ["AAPL", "MSFT", "GOOGL"]),
             Market.CSI300: ("CSI300", "沪深300指数成分股，包含沪深两市最具代表性的300只大盘蓝筹股。", []),
             Market.CSI500: ("CSI500", "中证500指数成分股，包含沪深两市最具代表性的500只中小盘股。", []),
             Market.CSI1000: ("CSI1000", "中证1000指数成分股，包含沪深两市最具代表性的1000只中小盘股。", []),
@@ -430,36 +388,6 @@ class MarketManager:
                 }
             )
             df = df[df["list_date"] < target_date]
-        elif market == Market.US:
-            # 优先使用缓存，fallback到tushare
-            df = self._get_us_stock_basic_cache()
-            if df is not None:
-                # 缓存数据已经可用，直接过滤
-                df = df[df["list_date"] < target_date]
-                df = df[~(df["delist_date"] < target_date)]
-                df = df.dropna(subset=["ts_code", "list_date"])
-                # 确保name列存在，如果没有则使用ts_code
-                if 'name' not in df.columns:
-                    df['name'] = df['ts_code']
-                return df
-            
-            # Fallback to tushare if cache not available
-            df_all = []
-            for i in range(5):
-                df = pro_cached.run(
-                func_name="us_basic", 
-                func_kwargs={
-                    "fields": "ts_code,name,list_date,delist_date",
-                    "offset": 5000 * i,
-                    "limit": 5000
-                    }
-                )
-                df_all.append(df)
-            df = pd.concat(df_all)
-            df = df[df["list_date"] < target_date]
-            df = df[~(df["delist_date"] < target_date)]
-            df = df.dropna(subset=["ts_code", "list_date"])
-            df['name'] = df['ts_code']
         else:
             raise ValueError(f"Invalid market: {market}")
         return df
@@ -558,12 +486,6 @@ class MarketManager:
                     func_kwargs={
                     }
                 )
-            elif market_name == "US-Stock":
-                trade_date = pro_cached.run(
-                    func_name="us_tradecal",
-                    func_kwargs={
-                    }
-                )
             else:
                 raise ValueError(f"Invalid market: {market_name}")
             trade_date = trade_date[trade_date["is_open"] == 1]["cal_date"].values.tolist()
@@ -632,32 +554,6 @@ class MarketManager:
             return None
         elif market_name == "HK-Stock":
             return None
-        elif market_name == "US-Stock":
-            try:
-                # 获取指定日期的历史数据（使用FMP默认前复权价格，适用于回测）
-                df = get_us_stock_price(symbol, target_trade_date, target_trade_date,
-                                      adjusted=True, adj_base_date=None, verbose=False)
-                if not df.empty:
-                    # 转换为与tushare格式兼容的字典
-                    row = df.iloc[0]
-                    price_data = {
-                        'ts_code': symbol,
-                        'trade_date': target_trade_date,
-                        'open': row['open'],
-                        'high': row['high'],
-                        'low': row['low'],
-                        'close': row['close'],
-                        'pre_close': row.get('adjClose', row['close']),  # 使用调整后收盘价
-                        'change': row.get('change', 0),
-                        'pct_chg': row.get('changePercent', 0),
-                        'vol': row.get('volume', 0),
-                        'amount': row.get('volume', 0) * row['close']  # 估算成交额
-                    }
-                    return price_data
-            except Exception as e:
-                logger.error(f"FMP数据获取失败，尝试tushare: {e}")
-       
-            return None
         else:
             raise ValueError(f"Invalid market: {market_name}")
 
@@ -682,10 +578,6 @@ class MarketManager:
                 }
             )
             return df
-        elif market_name == "US-Stock":
-            df = get_us_stock_price(symbol, start_date, end_date, 
-                                      adjusted=True, adj_base_date=None, verbose=False)
-            return df
         else:
             raise ValueError(f"Invalid market: {market_name}")
 
@@ -693,7 +585,7 @@ class MarketManager:
         # check if the market is trading at given trigger_time
         trigger_date = trigger_time.split(" ")[0].replace("-", "")
         trade_date = self.get_trade_date(market_name)
-        if market_name in ["CN-Stock", "CN-ETF", "US-Stock", "CSI300", "CSI500", "CSI1000"]:
+        if market_name in ["CN-Stock", "CN-ETF", "CSI300", "CSI500", "CSI1000"]:
             return trigger_date in trade_date
         elif market_name == "HK-Stock":
             # Not supported yet
@@ -713,9 +605,6 @@ class MarketManager:
             # A股：100股起，整手交易
             shares_float = target_amount / price
             return int(shares_float // 100) * 100
-        elif market_name == "US-Stock":
-            # 美股：1股起，任意股数
-            return int(target_amount / price)
         elif market_name == "HK-Stock":
             # 港股：通常100股起
             shares_float = target_amount / price
@@ -746,8 +635,6 @@ class MarketManager:
         
         if market_name in ["CN-Stock", "CN-ETF", "CSI300", "CSI500", "CSI1000"]:
             return self._calculate_a_stock_costs(config, action, shares, amount)
-        elif market_name == "US-Stock":
-            return self._calculate_us_stock_costs(config, action, shares, amount)
         elif market_name == "HK-Stock":
             return self._calculate_hk_stock_costs(config, action, shares, amount)
         else:
@@ -773,24 +660,6 @@ class MarketManager:
             'transfer_fee': transfer_fee,
             'slippage_cost': 0.0,  # 滑点在价格中已体现
             'total_cost': total_cost
-        }
-    
-    def _calculate_us_stock_costs(self, config: USStockTradingConfig, action: str, 
-                                shares: int, amount: float) -> Dict[str, float]:
-        """计算美股交易成本"""
-        if config.fee_type == "per_trade":
-            commission = config.commission_per_trade
-        elif config.fee_type == "per_share":
-            commission = shares * config.commission_per_share
-        else:  # zero_commission
-            commission = 0.0
-        
-        return {
-            'commission': commission,
-            'stamp_tax': 0.0,
-            'transfer_fee': 0.0,
-            'slippage_cost': 0.0,  # 滑点在价格中已体现
-            'total_cost': commission
         }
     
     def _calculate_hk_stock_costs(self, config: HKStockTradingConfig, action: str, 
@@ -887,23 +756,6 @@ class MarketManager:
             logger.error(f"读取股票基本信息缓存失败: {e}")
             return None
 
-    def _get_us_stock_basic_cache(self):
-        """获取美股基本信息缓存，优先使用离线缓存"""
-        cache_path = Path(__file__).parent / 'cache' / 'market_manager' / 'us_stock_basic_cache.json'
-        
-        try:
-            if cache_path.exists():
-                print(f"使用美股基本信息缓存: {cache_path}")
-                with open(cache_path, 'r', encoding='utf-8') as f:
-                    cache_data = json.load(f)
-                return pd.DataFrame(cache_data)
-            else:
-                print(f"美股基本信息缓存不存在: {cache_path}")
-                return None
-        except Exception as e:
-            logger.error(f"读取美股基本信息缓存失败: {e}")
-            return None
-
     def _save_trade_calendar_cache(self, trade_dates: list):
         """保存交易日历到缓存文件"""
         cache_file = Path(__file__).parent / 'cache' / 'market_manager' / 'trade_calendar.json'
@@ -976,6 +828,4 @@ if __name__ == "__main__":
     print(GLOBAL_MARKET_MANAGER.get_total_namechange("CN-Stock"))
     print(GLOBAL_MARKET_MANAGER.get_target_symbol_context("2025-01-01 09:00:00"))
 
-    print(GLOBAL_MARKET_MANAGER.get_market_symbols("US-Stock", "2025-01-09 15:00:00"))
     pass
-
