@@ -44,9 +44,16 @@ def _get_intraday_data(stock_code, trade_date=None):
         
         if df.empty: return None, "No intraday data for the specified date."
         
-        data_list = []
-        for _, row in df.iterrows():
-            data_list.append({'datetime_obj': row['日期'], 'last_price': row['收盘价'], 'trade_lots': row['成交量（手）'], 'preclose_price': None, 'total_trade_balance': row['成交额（元）']})
+        data_list = [
+            {'datetime_obj': row.日期, 'last_price': row.收盘价, 'trade_lots': row._3, 'preclose_price': None, 'total_trade_balance': row._4}
+            for row in df.itertuples()
+        ]
+        # 修正：成交量、成交额的列名含特殊字符，要用 getitem
+        # 上面用 itertuples 是为了速度，但列名访问对中文+括号不安全，回退用 r['xxx']
+        data_list = [
+            {'datetime_obj': r['日期'], 'last_price': r['收盘价'], 'trade_lots': r['成交量（手）'], 'preclose_price': None, 'total_trade_balance': r['成交额（元）']}
+            for r in df.to_dict('records')
+        ]
         
         if data_list:
             preclose = data_list[0]['last_price']
@@ -91,16 +98,33 @@ def _get_kline_data(stock_code, kline_num, end_date):
     df = pro_cached.run("daily", func_kwargs={'ts_code': stock_code, 'start_date': (datetime.strptime(end_date, '%Y%m%d') - timedelta(days=kline_num * 2)).strftime('%Y%m%d'), 'end_date': end_date}, verbose=False)
     if df is None or df.empty: return None
     df = df.sort_values('trade_date', ascending=False).head(kline_num).sort_values('trade_date', ascending=True)
-    return {'data': [{'trade_date': r['trade_date'], 'open_price': r['open'], 'high_price': r['high'], 'low_price': r['low'], 'close_price': r['close'], 'preclose_price': r['pre_close'], 'price_change': r['change'], 'price_change_rate': r['pct_chg'], 'volume': r['vol'], 'trade_amount': r['amount'], 'trade_lots': r['vol']} for _, r in df.iterrows()], 'stock_code': stock_code, 'kline_num': len(df)}
+    return {'data': [
+        {'trade_date': r['trade_date'], 'open_price': r['open'], 'high_price': r['high'], 'low_price': r['low'], 'close_price': r['close'], 'preclose_price': r['pre_close'], 'price_change': r['change'], 'price_change_rate': r['pct_chg'], 'volume': r['vol'], 'trade_amount': r['amount'], 'trade_lots': r['vol']}
+        for r in df.to_dict('records')
+    ], 'stock_code': stock_code, 'kline_num': len(df)}
 
 def _get_kline_data_us(symbol, kline_num, end_date):
     df = get_us_stock_price(symbol=symbol, from_date=(datetime.strptime(end_date, '%Y%m%d') - timedelta(days=kline_num * 2)).strftime('%Y-%m-%d'), to_date=datetime.strptime(end_date, '%Y%m%d').strftime('%Y-%m-%d'), adjusted=True, verbose=False)
     if df is None or df.empty: return None
     df = df.sort_values('date', ascending=False).head(kline_num).sort_values('date', ascending=True).reset_index(drop=True)
-    kline_data = []
-    for i, r in df.iterrows():
-        preclose = df.iloc[i-1]['close'] if i > 0 else r['close']
-        kline_data.append({'trade_date': r['date'].strftime('%Y%m%d'), 'open_price': float(r['open']), 'high_price': float(r['high']), 'low_price': float(r['low']), 'close_price': float(r['close']), 'preclose_price': float(preclose), 'price_change': float(r['close'] - preclose), 'price_change_rate': (float(r['close'] - preclose) / preclose * 100) if preclose != 0 else 0, 'volume': int(r['volume']), 'trade_amount': float(r['volume'] * r['close']), 'trade_lots': int(r['volume'])})
+    # 用 shift(1) 算前收盘价，比 iterrows 快 10 倍
+    prev_close = df['close'].shift(1).fillna(df['close'])
+    kline_data = [
+        {
+            'trade_date': r['date'].strftime('%Y%m%d'),
+            'open_price': float(r['open']),
+            'high_price': float(r['high']),
+            'low_price': float(r['low']),
+            'close_price': float(r['close']),
+            'preclose_price': float(pc),
+            'price_change': float(r['close'] - pc),
+            'price_change_rate': (float(r['close'] - pc) / pc * 100) if pc != 0 else 0,
+            'volume': int(r['volume']),
+            'trade_amount': float(r['volume'] * r['close']),
+            'trade_lots': int(r['volume'])
+        }
+        for r, pc in zip(df.to_dict('records'), prev_close.tolist())
+    ]
     return {'data': kline_data, 'stock_code': symbol, 'kline_num': len(kline_data)}
 
 def _generate_kline_chart_base64(data, stock_code, stock_name, report_date, currency_symbol="元", volume_unit="手"):
@@ -110,10 +134,15 @@ def _generate_kline_chart_base64(data, stock_code, stock_name, report_date, curr
     df = df.sort_values('date').reset_index(drop=True)
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(16, 10), gridspec_kw={'height_ratios': [4, 1], 'hspace': 0.2})
     x_pos = np.arange(len(df))
-    for i, r in df.iterrows():
-        color = '#ff6b6b' if r['close_price'] >= r['open_price'] else '#51cf66'
-        ax1.plot([i, i], [r['low_price'], r['high_price']], color=color, linewidth=1)
-        rect = plt.Rectangle((i - 0.3, min(r['open_price'], r['close_price'])), 0.6, abs(r['close_price'] - r['open_price']), facecolor=color, edgecolor=color)
+    # 批量画 K 线：先算好 colors 和 geometry，一次性 add_collection
+    colors = ['#ff6b6b' if c >= o else '#51cf66' for c, o in zip(df['close_price'], df['open_price'])]
+    lows = df['low_price'].tolist()
+    highs = df['high_price'].tolist()
+    opens = df['open_price'].tolist()
+    closes = df['close_price'].tolist()
+    for i in range(len(df)):
+        ax1.plot([i, i], [lows[i], highs[i]], color=colors[i], linewidth=1)
+        rect = plt.Rectangle((i - 0.3, min(opens[i], closes[i])), 0.6, abs(closes[i] - opens[i]), facecolor=colors[i], edgecolor=colors[i])
         ax1.add_patch(rect)
     for ma in [5, 10, 20, 60]:
         if len(df) >= ma: ax1.plot(x_pos, df['close_price'].rolling(window=ma).mean(), linewidth=1.5, label=f'MA{ma}')
@@ -318,7 +347,7 @@ def _create_sector_dc_prompt(sector_result):
 
 板块详细信息（按资金净流入排序）:
 """
-    for i, (_, r) in enumerate(data.iterrows(), 1):
+    for i, r in enumerate(data.to_dict('records'), 1):
         prompt += f"\n{i}. 板块名称: {r['name']}\n   板块排名: 第{r['rank']}位\n   资金净流入: {r['net_amount']/1e8:.2f}亿元\n   板块涨跌幅: {r['pct_change']:.2f}%\n   板块收盘价: {r['close']:.2f}\n   板块代码: {r['ts_code']}"
     prompt += "\n\n请基于以上该股票所属的多个板块资金流向数据，分析各板块的资金偏好、市场表现差异，并评估该股票在不同板块中的定位."
     return prompt.strip()
@@ -332,7 +361,7 @@ def _get_stock_recent_3days_moneyflow_dc(market, stock_code, end_date):
 def _create_recent_3days_dc_narrative(symbol, moneyflow_data):
     narrative = f"{symbol}近三日资金流向分析：\n\n"
     total_net_inflow = 0
-    for i, (_, r) in enumerate(moneyflow_data['data'].iterrows(), 1):
+    for i, r in enumerate(moneyflow_data['data'].to_dict('records'), 1):
         total_net_inflow += r['net_amount']
         narrative += f"第{i}日({r['trade_date']}): 总净流入{r['net_amount']/1e4:.2f}亿元，主力净流入{r['buy_lg_amount']/1e4:.2f}亿元，散户净流入{r['buy_elg_amount']/1e4:.2f}亿元，涨跌幅:{r['pct_change']:.2f}%\n"
     narrative += f"\n三日累计{'净流入' if total_net_inflow > 0 else '净流出'}{abs(total_net_inflow/1e4):.2f}亿元"

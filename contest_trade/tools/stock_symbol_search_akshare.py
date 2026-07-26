@@ -94,7 +94,7 @@ def search_single_query(symbols_df: pd.DataFrame, query: str, limit: int, match_
     if symbols_df.empty:
         return results
     
-    for _, row in symbols_df.iterrows():
+    for row in symbols_df.to_dict('records'):
         ts_code = str(row.get('ts_code', ''))
         name = str(row.get('name', ''))
         

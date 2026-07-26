@@ -92,7 +92,7 @@ class TushareDataProvider:
                         df = df.sort_values('trade_date', ascending=True)
                         
                         kline_list = []
-                        for _, row in df.iterrows():
+                        for row in df.to_dict('records'):
                             kline_item = {
                                 'trade_date': int(row['trade_date']),
                                 'open_price': float(row['open']),
@@ -248,7 +248,7 @@ class TushareDataProvider:
                 df = df.sort_values('net_amount', ascending=False).head(top_n)
                 
                 sectors_info = []
-                for _, row in df.iterrows():
+                for row in df.to_dict('records'):
                     sector_info = {
                         'name': row['name'],
                         'ts_code': row['ts_code'],

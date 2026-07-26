@@ -97,7 +97,7 @@ def search_single_query(query: str, limit: int, match_mode: str, market: str) ->
     if search_df.empty:
         return []
     
-    for _, row in search_df.iterrows():
+    for row in search_df.to_dict('records'):
         symbol = row.get('symbol', '')
         name = row.get('name', '')
         av_match_score = row.get('match_score', 0.0)

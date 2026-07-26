@@ -10,6 +10,7 @@ import yaml
 import textwrap
 import asyncio
 import time
+import traceback
 from loguru import logger
 from typing import List, Dict, Any, Optional, TypedDict
 from datetime import datetime
@@ -168,18 +169,16 @@ class ResearchAgent:
                     signal_data = json.load(f)
                 state["result"] = ResearchAgentOutput(**signal_data)
         except Exception as e:
-            print(f"Error loading signal from file: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.warning(f"Error loading signal from file: {e}")
         return state
-    
+
     async def _recompute_signal(self, state: ResearchAgentState):
         """recompute signal"""
         if state["result"]:
-            print(f"Signal already exists for {state['trigger_time']}, skipping recompute")
+            logger.info(f"Signal already exists for {state['trigger_time']}, skipping recompute")
             return "no"
         else:
-            print(f"Signal does not exist for {state['trigger_time']}, recomputing signal")
+            logger.info(f"Signal does not exist for {state['trigger_time']}, recomputing signal")
             return "yes"
 
     async def _init_data(self, state: ResearchAgentState) -> ResearchAgentState:
@@ -322,6 +321,15 @@ class ResearchAgent:
             state["final_result"] = result_result.content
             state["final_result_thinking"] = result_result.reasoning_content
 
+            # 尝试从输出解析 JSON 信号（优先），失败则回退到 XML 正则
+            parsed_signals = self._parse_json_signals(result_result.content)
+            if parsed_signals is not None:
+                state["parsed_signals"] = parsed_signals
+                logger.info(f"[write_result] JSON 解析成功: {len(parsed_signals)} 个信号")
+            else:
+                state["parsed_signals"] = []
+                logger.info("[write_result] JSON 解析失败，回退到 XML 正则（由 main.py 处理）")
+
             # 创建 ResearchAgentOutput 对象
             state["result"] = ResearchAgentOutput(
                 task=state["task"],
@@ -338,6 +346,44 @@ class ResearchAgent:
         step_elapsed = time.time() - step_start
         logger.info(f"[耗时] write_result 完成: {step_elapsed:.2f}秒")
         return state
+
+    @staticmethod
+    def _parse_json_signals(content: str):
+        """从 LLM 输出中提取 <Output>{JSON}</Output> 并解析为结构化信号列表。
+        解析失败返回 None（由调用方回退到 XML 正则）。"""
+        if not content:
+            return None
+        try:
+            m = re.search(r"<Output>\s*(\{.*?\})\s*</Output>", content, flags=re.DOTALL)
+            if not m:
+                return None
+            data = json.loads(m.group(1))
+            signals = data.get("signals")
+            if not isinstance(signals, list):
+                return None
+            # 标准化每个信号字段
+            normalized = []
+            for s in signals:
+                normalized.append({
+                    "has_opportunity": str(s.get("has_opportunity", "yes")).lower(),
+                    "action": str(s.get("action", "buy")).lower(),
+                    "symbol_code": str(s.get("symbol_code", "")).strip(),
+                    "symbol_name": str(s.get("symbol_name", "")).strip(),
+                    "evidence_list": [
+                        {
+                            "description": str(e.get("description", "")).strip(),
+                            "time": str(e.get("time", "N/A")).strip(),
+                            "from_source": str(e.get("from_source", "N/A")).strip(),
+                        }
+                        for e in (s.get("evidence_list") or [])
+                        if isinstance(e, dict)
+                    ],
+                    "limitations": [str(l).strip() for l in (s.get("limitations") or []) if str(l).strip()],
+                    "probability": str(s.get("probability", "")).strip(),
+                })
+            return normalized
+        except (json.JSONDecodeError, ValueError, TypeError, AttributeError):
+            return None
     
     async def _submit_result(self, state: ResearchAgentState) -> ResearchAgentState:
         """Write the result to a file"""
@@ -345,10 +391,9 @@ class ResearchAgent:
             signal_file = self.signal_dir / f'{state["trigger_time"].replace(" ", "_").replace(":", "-")}.json'
             with open(signal_file, 'w', encoding='utf-8') as f:
                 json.dump(state["result"].to_dict(), f, ensure_ascii=False, indent=4)
-            print(f"Research result saved to {signal_file}")
+            logger.info(f"Research result saved to {signal_file}")
         except Exception as e:
-            print(f"Error writing result: {e}")
-            import traceback
+            logger.error(f"Error writing result: {e}")
             traceback.print_exc()
         return state
 
@@ -427,30 +472,30 @@ class ResearchAgent:
             final_result_thinking="",
             result=None
         )
-        print(f"🚀 Research Agent Starting - {input.trigger_time}")
+        logger.info(f"Research Agent Starting - {input.trigger_time}")
         async for event in self.app.astream_events(initial_state, version="v2", config=config or RunnableConfig(recursion_limit=50)):
             yield event
 
     async def run_with_monitoring(self, input: ResearchAgentInput) -> ResearchAgentOutput:
         """使用事件流监控运行Agent"""
-        print(f"🚀 Research Agent Starting - {input.trigger_time}")
+        logger.info(f"Research Agent Starting - {input.trigger_time}")
         final_result = None
         async for event in self.run_with_monitoring_events(input, RunnableConfig(recursion_limit=50)):
             event_type = event["event"]
             if event_type == "on_chain_start":
                 node_name = event["name"]
                 if node_name != "__start__":  # 忽略开始事件
-                    print(f"🔄 Starting: {node_name}")
-                
+                    logger.info(f"Starting: {node_name}")
+
             elif event_type == "on_chain_end":
                 node_name = event["name"]
                 if node_name != "__start__":  # 忽略开始事件
-                    print(f"✅ Completed: {node_name}")
+                    logger.info(f"Completed: {node_name}")
                     if node_name == "submit_result":
                         final_state = event.get("data", {}).get("output", None)
                         if final_state and "result" in final_state and final_state["result"]:
                             return final_state["result"]
-        print(f"✨ Research Agent Completed")
+        logger.info(f"Research Agent Completed")
         return final_result
         
 

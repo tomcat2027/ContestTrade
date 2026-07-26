@@ -145,13 +145,13 @@ class DataAnalysisAgent:
                 # 创建实例
                 data_source = data_source_class()
                 self.data_source_list.append(data_source)
-                print(f"Successfully loaded data source: {source_path}")
-                
+                logger.info(f"Successfully loaded data source: {source_path}")
+
             except (ImportError, AttributeError) as e:
-                print(f"Error loading data source '{source_path}': {e}")
+                logger.error(f"Error loading data source '{source_path}': {e}")
                 continue
             except Exception as e:
-                print(f"Unexpected error loading '{source_path}': {e}")
+                logger.error(f"Unexpected error loading '{source_path}': {e}")
                 continue
 
 
@@ -188,18 +188,16 @@ class DataAnalysisAgent:
                     factor_data = json.load(f)
                 state["result"] = DataAnalysisAgentOutput(**factor_data)
         except Exception as e:
-            print(f"Error loading factor from file: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.warning(f"Error loading factor from file: {e}")
         return state
-    
+
     async def _recompute_factor(self, state: DataAnalysisAgentState):
         """recompute factor"""
         if state["result"]:
-            print(f"Data already exists for {state['trigger_time']}, skipping recompute")
+            logger.info(f"Data already exists for {state['trigger_time']}, skipping recompute")
             return "no"
         else:
-            print(f"Data does not exist for {state['trigger_time']}, recomputing factor")
+            logger.info(f"Data does not exist for {state['trigger_time']}, recomputing factor")
             return "yes"
 
     async def _preprocess(self, state: DataAnalysisAgentState) -> DataAnalysisAgentState:
@@ -260,7 +258,7 @@ class DataAnalysisAgent:
                 'titles_per_batch': min(self.config.title_selection_per_batch, batch_size)
             }
         except Exception as e:
-            print(f"Error preprocessing data: {e}")
+            logger.error(f"Error preprocessing data: {e}")
             traceback.print_exc()
             return state
         step_elapsed = time.time() - step_start
@@ -314,7 +312,7 @@ class DataAnalysisAgent:
                     batch_results.append(result)
 
         except Exception as e:
-            print(f"Error processing batch: {e}")
+            logger.error(f"Error processing batch: {e}")
             traceback.print_exc()
             batch_results = []
         state["batch_results"] = batch_results
@@ -413,8 +411,7 @@ class DataAnalysisAgent:
             logger.info(f"[耗时] final_summary 完成: {step_elapsed:.2f}秒, 最终摘要长度: {len(final_summary)}")
             return state
         except Exception as e:
-            print(f"Error final summary: {e}")
-            import traceback
+            logger.error(f"Error final summary: {e}")
             traceback.print_exc()
             step_elapsed = time.time() - step_start
             logger.error(f"[耗时] final_summary 失败: {step_elapsed:.2f}秒")
@@ -436,42 +433,43 @@ class DataAnalysisAgent:
             "error": None
         }
         
-        print(f"Starting to process batch {batch_idx} ({len(batch_df)} documents)...")
-        
+        logger.info(f"Starting to process batch {batch_idx} ({len(batch_df)} documents)...")
+
         try:
             # Filter document titles
             filtered_df = await self._filter_docs_by_title(trigger_datetime, batch_df, titles_to_select)
-            
+
             # Record filtered document details
             batch_result["filtered_count"] = len(filtered_df)
+            # 用 itertuples 替代 iterrows：速度快 5-10 倍，且不会搞乱 dtype
             batch_result["filtered_docs"] = [
                 {
-                    "id": row.get('id', ''),
+                    "id": row.id,
                     "original_index": idx,
-                    "title": row.get('title', ''),
-                    "pub_time": row.get('pub_time', ''),
-                    "content_length": len(str(row.get('content', '')))
+                    "title": row.title,
+                    "pub_time": row.pub_time,
+                    "content_length": len(str(row.content))
                 }
-                for idx, row in filtered_df.iterrows()
+                for idx, row in zip(filtered_df.index, filtered_df.itertuples())
             ]
-            
+
             # Generate content summary
             summary = await self._summarize_doc_content(trigger_datetime, filtered_df, bias_goal)
-            
+
             batch_result["summary"] = summary
             batch_result["summary_length"] = count_tokens(summary) if summary else 0
             batch_result["success"] = True
-            
+
             # Collect references from batch summary
             summary_ref_ids = [int(i) for i in re.findall(r'\[(\d+)\]', summary)]
             batch_result["references"] = filtered_df[filtered_df["id"].isin(summary_ref_ids)].to_dict(orient="records")
-            
-            print(f"Completed processing batch {batch_idx}")
+
+            logger.info(f"Completed processing batch {batch_idx}")
             
         except Exception as e:
             error_msg = f"Error processing batch {batch_idx}: {e}"
+            logger.error(error_msg)
             traceback.print_exc()
-            print(error_msg)
             batch_result["error"] = error_msg
         
         # Record batch processing completion time
@@ -487,14 +485,12 @@ class DataAnalysisAgent:
         if batch_df.empty or len(batch_df) <= titles_to_select:
             return batch_df
         
-        # Build title context
-        titles_context = ""
-        for idx, row in batch_df.iterrows():
-            doc_id = row.get('id', idx)
-            title = row.get('title', '')
-            pub_time = row.get('pub_time', '')
-            titles_context += f"ID: {doc_id}\nTitle: {title}\nPublish Time: {pub_time}\n\n"
-        
+        # Build title context — itertuples 比 iterrows 快且保留 dtype
+        titles_context = "\n".join(
+            f"ID: {row.id}\nTitle: {row.title}\nPublish Time: {row.pub_time}"
+            for row in batch_df.itertuples()
+        )
+
         prompt = prompt_for_data_analysis_filter_doc.format(
             trigger_datetime=trigger_datetime,
             titles_to_select=titles_to_select,
@@ -531,25 +527,27 @@ class DataAnalysisAgent:
         """Summarize filtered document content"""
         if batch_df.empty:
             return "No valid document content"
-        
-        # Build document content context
-        doc_context = ""
-        doc_raw_content = ""
-        for _, row in batch_df.iterrows():
-            doc_id = row.get('id', '')
-            title = row.get('title', '')
-            content = row.get('content', '')
-            pub_time = row.get('pub_time', '')
-            
+
+        # Build document content context — 用列表 + join 替代逐行字符串拼接
+        doc_lines = []
+        raw_lines = []
+        for row in batch_df.itertuples():
+            doc_id = row.id
+            title = row.title
+            content = row.content
+            pub_time = row.pub_time
+
             # Truncate content
             if len(content) > self.config.content_cutoff_length:
                 content = content[:self.config.content_cutoff_length] + "..."
-            
+
             if pub_time.endswith("23:59:59"):
                 pub_time = pub_time.split(" ")[0]
-            doc_context += f"<doc id={doc_id}> Title: {title}\nPublish Time: {pub_time}\nContent: {content}</doc>\n"
-            doc_raw_content += f"Title: {title}\nPublish Time: {pub_time}\nContent: {content}\n"
-        
+            doc_lines.append(f"<doc id={doc_id}> Title: {title}\nPublish Time: {pub_time}\nContent: {content}</doc>")
+            raw_lines.append(f"Title: {title}\nPublish Time: {pub_time}\nContent: {content}")
+
+        doc_context = "\n".join(doc_lines) + "\n"
+        doc_raw_content = "\n".join(raw_lines) + "\n"
         if len(doc_context) <= self.config.summary_target_tokens and not bias_goal:
             return doc_raw_content
 
@@ -581,10 +579,9 @@ class DataAnalysisAgent:
             factor_file = self.factor_dir / f'{state["trigger_time"].replace(" ", "_").replace(":", "-")}.json'
             with open(factor_file, 'w', encoding='utf-8') as f:
                 json.dump(state["result"].to_dict(), f, ensure_ascii=False, indent=4)
-            print(f"Data analysis result saved to {factor_file}")
+            logger.info(f"Data analysis result saved to {factor_file}")
         except Exception as e:
-            print(f"Error writing result: {e}")
-            import traceback
+            logger.error(f"Error writing result: {e}")
             traceback.print_exc()
         return state
 
@@ -607,8 +604,8 @@ class DataAnalysisAgent:
             result=None
         )
         
-        print(f"🚀 Data Analysis Agent Starting - {input.trigger_time}")
-        
+        logger.info(f"Data Analysis Agent Starting - {input.trigger_time}")
+
         # 返回事件流
         async for event in self.app.astream_events(initial_state, version="v2", config=config or RunnableConfig(recursion_limit=50)):
             yield event
@@ -622,11 +619,11 @@ class DataAnalysisAgent:
             if event_type == "on_chain_start":
                 node_name = event["name"]
                 if node_name != "__start__":  # 忽略开始事件
-                    print(f"🔄 Starting: {node_name}")
+                    logger.info(f"Starting: {node_name}")
             elif event_type == "on_chain_end":
                 node_name = event["name"]
                 if node_name != "__start__":  # 忽略开始事件
-                    print(f"✅ Completed: {node_name}")
+                    logger.info(f"Completed: {node_name}")
                     if node_name == "submit_result":
                         final_state = event.get("data", {}).get("output", None)
                         if final_state and "result" in final_state and final_state["result"]:

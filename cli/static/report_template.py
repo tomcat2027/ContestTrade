@@ -3,6 +3,7 @@ ContestTrade Final Report Template
 最终报告模板生成器
 """
 import os
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List
@@ -427,5 +428,73 @@ def display_final_report_interactive(final_state: Dict, results_dir: Path):
     markdown_content, save_path = generate_final_report(final_state, results_dir)
     generator = FinalReportGenerator(final_state)
     generator.display_interactive_report(markdown_content, save_path)
-    
+
     return save_path
+
+
+def generate_final_report_json(final_state: Dict, results_dir: Path) -> Path:
+    """生成最终报告的 JSON 版本（供 web 直接读取，绕过 markdown 正则解析）。
+
+    与 .md 配对（同名 .json），web 优先读 JSON，回退 .md。
+    """
+    trigger_time = final_state.get('trigger_time', 'N/A')
+    if trigger_time == 'N/A' or trigger_time is None:
+        safe_time = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+    else:
+        safe_time = trigger_time.replace(' ', '_').replace(':', '-')
+
+    step_results = final_state.get('step_results', {})
+    data_team = step_results.get('data_team', {})
+    research_team = step_results.get('research_team', {})
+    contest = step_results.get('contest', {})
+    best_signals = contest.get('best_signals', [])
+
+    valid_signals = [s for s in best_signals if s.get('has_opportunity', 'no') == 'yes']
+    invalid_signals = [s for s in best_signals if s.get('has_opportunity', 'no') != 'yes']
+    signal_rate = f"{len(valid_signals)/len(best_signals)*100:.1f}% ({len(valid_signals)}/{len(best_signals)})" if len(best_signals) > 0 else "0% (0/0)"
+
+    # 转换信号为 web 友好的格式（直接对应 web 渲染需要的字段）
+    json_signals = []
+    for s in valid_signals:
+        # 兼容 XML 旧格式的字段名（time/from_source）和 JSON 新格式（description）
+        evidences = s.get('evidence_list', [])
+        json_evidences = []
+        for e in evidences:
+            json_evidences.append({
+                "text": e.get("description", e.get("text", "")),
+                "source": e.get("from_source", e.get("source", "")),
+                "time": e.get("time", ""),
+            })
+        json_signals.append({
+            "name": s.get("symbol_name", ""),
+            "code": s.get("symbol_code", ""),
+            "action": s.get("action", "buy"),
+            "agent": s.get("agent_name", s.get("agent", f"Research Agent {s.get('agent_id', '?')}")) ,
+            "evidence": json_evidences,
+            "risks": s.get("limitations", s.get("risks", [])),
+        })
+
+    json_payload = {
+        "trigger_time": trigger_time,
+        "metrics": {
+            "time": trigger_time,
+            "data_sources": str(data_team.get("factors_count", 0)),
+            "signal_count": str(research_team.get("signals_count", 0)),
+            "valid_count": str(len(valid_signals)),
+            "valid_rate": signal_rate,
+        },
+        "signals": json_signals,
+        "invalid_signals_count": len(invalid_signals),
+        "elapsed": {
+            "data_team": data_team.get("elapsed_seconds", 0),
+            "research_team": research_team.get("elapsed_seconds", 0),
+        },
+        "format": "json",
+    }
+
+    research_reports_dir = results_dir / "research_reports"
+    research_reports_dir.mkdir(parents=True, exist_ok=True)
+    json_path = research_reports_dir / f"final_report_{safe_time}.json"
+    with open(json_path, 'w', encoding='utf-8') as f:
+        json.dump(json_payload, f, ensure_ascii=False, indent=2)
+    return json_path

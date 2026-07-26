@@ -34,7 +34,7 @@ class USPolygonNews(DataSourceBase):
             
             # 标准化数据格式
             result_data = []
-            for _, row in news_df.iterrows():
+            for row in news_df.to_dict('records'):
                 # 处理发布时间
                 pub_time = row.get('published_utc', trigger_time)
                 if isinstance(pub_time, str):

@@ -12,6 +12,7 @@ import http.server
 import json
 import os
 import re
+import time
 import urllib.parse
 from pathlib import Path
 
@@ -172,6 +173,14 @@ HTML = """<!DOCTYPE html>
   .risk-list { list-style: none; }
   .risk-list li { padding: 7px 0 7px 22px; font-size: 13px; color: var(--text-2); position: relative; line-height: 1.7; }
   .risk-list li::before { content: "⚠"; position: absolute; left: 0; top: 7px; font-size: 11px; color: var(--warn); }
+
+  /* ===== 证据一致性警告 ===== */
+  .mismatch { margin-top: 16px; padding: 12px 16px; background: rgba(198,130,53,0.08); border: 1px solid rgba(198,130,53,0.3); border-radius: 8px; display: flex; gap: 10px; align-items: flex-start; }
+  .mismatch .m-icon { font-size: 14px; color: var(--warn); flex-shrink: 0; line-height: 1.6; }
+  .mismatch .m-text { font-size: 12.5px; color: var(--warn); line-height: 1.6; }
+  .mismatch .m-text strong { color: var(--warn); }
+  .cell.warn { box-shadow: 0 0 0 2px rgba(198,130,53,0.5), var(--shadow); }
+  .cell.warn .cname::after { content: " ⚠"; color: var(--warn); font-size: 11px; }
 
   /* ===== 数据报告 markdown 渲染 ===== */
   .md-report { padding: 48px 56px 64px; max-width: 920px; }
@@ -421,6 +430,21 @@ function inferIndustry(text) {
   return {name:'其他', color:'#8B8B8B'};
 }
 
+// 证据一致性检测：标题股票名是否在证据正文出现。返回 {ok, evidenceMentions}
+function checkConsistency(sg) {
+  const name = (sg.name || '').trim();
+  const evs = sg.evidence || [];
+  if (!name || !evs.length) return {ok: true, mentions: []};
+  const body = evs.map(e => (e.text || '') + ' ' + (e.source || '')).join(' ');
+  // 取标题前 2-4 个字符作为核心名（兼容"北方华创""源杰科技""贵州茅台"）
+  const core = name.length >= 4 ? name.slice(0, Math.min(name.length, 4)) : name;
+  const ok = body.indexOf(name) !== -1 || body.indexOf(core) !== -1;
+  // 顺带提取证据里高频出现的"真实标的"，用于提示
+  const known = ['北方华创','源杰科技','众生药业','贵州茅台','阳光电源','寒武纪','吉比特','中际旭创','新易盛','东山精密','中芯国际','通威股份'];
+  const mentions = known.filter(k => k !== name && body.indexOf(k) !== -1);
+  return {ok, mentions};
+}
+
 function renderFinalHtml(s) {
   const m = s.metrics || {};
   const sigs = s.signals || [];
@@ -443,7 +467,9 @@ function renderFinalHtml(s) {
     html += '<div class="matrix">';
     sigs.forEach((sg, i) => {
       const ind = inferIndustry(sg.name + ' ' + (sg.evidence||[]).join(' '));
-      html += '<div class="cell" style="background:' + ind.color + '1A;border-color:' + ind.color + '55" title="' + sg.name + ' (' + sg.code + ') · ' + ind.name + ' · #' + (i+1) + '" data-idx="' + i + '"><div class="cname">' + (sg.name || '-') + '</div><div class="ccode">' + (sg.code || '') + '</div></div>';
+      const ck = checkConsistency(sg);
+      const warnCls = ck.ok ? '' : ' warn';
+      html += '<div class="cell' + warnCls + '" style="background:' + ind.color + '1A;border-color:' + ind.color + '55" title="' + sg.name + ' (' + sg.code + ') · ' + ind.name + (ck.ok ? '' : ' · ⚠ 证据与标的可能不符') + ' · #' + (i+1) + '" data-idx="' + i + '"><div class="cname">' + (sg.name || '-') + '</div><div class="ccode">' + (sg.code || '') + '</div></div>';
     });
     html += '</div></div>';
   }
@@ -451,6 +477,7 @@ function renderFinalHtml(s) {
   html += '<div class="signals"><div class="signals-title">投资信号</div>';
   sigs.forEach((sg, i) => {
     const ind = inferIndustry(sg.name + ' ' + (sg.evidence||[]).join(' '));
+    const ck = checkConsistency(sg);
     const action = (sg.action||'buy').toLowerCase();
     html += '<div class="signal-card" id="sig-' + i + '">';
     html += '<div class="sc-head"><div class="sc-idx">' + String(i+1).padStart(2,'0') + '</div>';
@@ -462,6 +489,11 @@ function renderFinalHtml(s) {
     html += '<span class="badge ' + action + '">' + (action === 'buy' ? '买入' : '卖出') + '</span>';
     html += '</div></div>';
     html += '<div class="sc-body">';
+    // 证据一致性警告（标题标的与证据正文不符时提示）
+    if (!ck.ok) {
+      const hint = ck.mentions.length ? '证据实际指向：<strong>' + ck.mentions.slice(0,3).join('、') + '</strong>' : '证据未提及该标的';
+      html += '<div class="mismatch"><div class="m-icon">⚠</div><div class="m-text"><strong>证据与标的可能不符</strong>　' + hint + '，疑似 AI 生成时张冠李戴，请人工复核。</div></div>';
+    }
     if (sg.evidence && sg.evidence.length) {
       html += '<div class="sc-section-label">支撑证据 · ' + sg.evidence.length + ' 项</div>';
       html += '<ul class="evidence">';
@@ -509,57 +541,147 @@ def safe_resolve(rel_path: str):
     return candidate
 
 
+def _extract_markdown_metrics(content: str) -> dict:
+    """从 markdown 元信息（执行摘要）抽取 metrics。"""
+    metrics = {}
+    patterns = [
+        (r"\*\*分析时间\*\*[:：]\s*([^\n]+)", "time"),
+        (r"\*\*数据源数量\*\*[:：]\s*(\d+)", "data_sources"),
+        (r"\*\*研究信号数量\*\*[:：]\s*(\d+)", "signal_count"),
+        (r"\*\*有效投资信号\*\*[:：]\s*(\d+)", "valid_count"),
+        (r"\*\*信号有效率\*\*[:：]\s*([\d.]+%)", "valid_rate"),
+    ]
+    for pat, key in patterns:
+        m = re.search(pat, content)
+        if m:
+            metrics[key] = m.group(1).strip()
+    return metrics
+
+
+def _try_extract_json_signals(content: str):
+    """从 markdown 里抠出 <Output>{JSON}</Output> 块并解析。
+    返回 None 表示没找到或解析失败（让调用方回退到 markdown 正则）。"""
+    try:
+        # 1. 优先匹配 <Output>{...}</Output>（新 research agent 输出）
+        m = re.search(r"<Output>\s*(\{.*?\})\s*</Output>", content, flags=re.DOTALL)
+        if not m:
+            # 2. 尝试匹配代码块里的 json
+            m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", content, flags=re.DOTALL)
+        if not m:
+            return None
+        data = json.loads(m.group(1))
+        signals = data.get("signals")
+        if not isinstance(signals, list):
+            return None
+
+        result = {"metrics": {}, "signals": [], "format": "json"}
+        if "metrics" in data and isinstance(data["metrics"], dict):
+            result["metrics"].update(data["metrics"])
+
+        for s in signals:
+            if not isinstance(s, dict):
+                continue
+            sig = {
+                "name": str(s.get("symbol_name", "")).strip(),
+                "code": str(s.get("symbol_code", "")).strip(),
+                "action": str(s.get("action", "buy")).lower(),
+                "agent": str(s.get("agent", "")).strip(),
+                "evidence": [
+                    {
+                        "text": str(e.get("description", "")).strip(),
+                        "source": str(e.get("from_source", "")).strip(),
+                        "time": str(e.get("time", "")).strip(),
+                    }
+                    for e in (s.get("evidence_list") or [])
+                    if isinstance(e, dict)
+                ],
+                "risks": [str(l).strip() for l in (s.get("limitations") or []) if str(l).strip()],
+            }
+            if sig["name"] or sig["code"]:
+                result["signals"].append(sig)
+        return result if result["signals"] else None
+    except (json.JSONDecodeError, ValueError, TypeError, AttributeError):
+        return None
+
+
 def parse_structured(content: str) -> dict:
-    """把研究报告 markdown 解析成结构化信号数据，供前端卡片渲染。"""
-    result = {"metrics": {}, "signals": []}
+    """把研究报告 markdown 解析成结构化信号数据，供前端卡片渲染。
 
-    # 指标
-    m = re.search(r"分析时间\*\*:\s*([^\n]+)", content)
-    if m:
-        result["metrics"]["time"] = m.group(1).strip()
-    m = re.search(r"数据源数量\*\*:\s*(\d+)", content)
-    if m:
-        result["metrics"]["data_sources"] = m.group(1).strip()
-    m = re.search(r"研究信号数量\*\*:\s*(\d+)", content)
-    if m:
-        result["metrics"]["signal_count"] = m.group(1).strip()
-    m = re.search(r"有效投资信号\*\*:\s*(\d+)", content)
-    if m:
-        result["metrics"]["valid_count"] = m.group(1).strip()
-    m = re.search(r"信号有效率\*\*:\s*([\d.]+%)", content)
-    if m:
-        result["metrics"]["valid_rate"] = m.group(1).strip()
+    优先级：JSON（research agent 新版输出）> markdown 正则（旧版输出）> 空结构。
+    LLM 输出格式会漂移，正则解析脆弱；JSON 路径消灭漂移。
+    """
+    result = {"metrics": {}, "signals": [], "format": "markdown"}
 
-    # 按信号标题分块: #### 1. 名称 (代码)
+    # 1. 尝试从 markdown 里抠 JSON（新 research agent 输出格式）
+    json_data = _try_extract_json_signals(content)
+    if json_data is not None:
+        json_data["format"] = "json"
+        # 从 markdown 元信息补 metrics（JSON 里通常没有这些）
+        md_metrics = _extract_markdown_metrics(content)
+        for k, v in md_metrics.items():
+            json_data["metrics"].setdefault(k, v)
+        return json_data
+
+    # 2. 回退到 markdown 正则解析（旧报告/老格式）
+
+    # 指标 — 宽松匹配 **key**: value 或 **key**：value（全角冒号），容错多余空格
+    def _metric(patterns, text):
+        for p in patterns:
+            m = re.search(p, text)
+            if m:
+                return m.group(1).strip()
+        return None
+
+    t = _metric([r"\*\*分析时间\*\*[:：]\s*([^\n]+)", r"分析时间[:：]\s*([^\n]+)"], content)
+    if t:
+        result["metrics"]["time"] = t
+    ds = _metric([r"\*\*数据源数量\*\*[:：]\s*(\d+)", r"数据源数量[:：]\s*(\d+)", r"数据源[:：]\s*(\d+)"], content)
+    if ds:
+        result["metrics"]["data_sources"] = ds
+    sc = _metric([r"\*\*研究信号数量\*\*[:：]\s*(\d+)", r"研究信号数量[:：]\s*(\d+)", r"信号数量[:：]\s*(\d+)"], content)
+    if sc:
+        result["metrics"]["signal_count"] = sc
+    vc = _metric([r"\*\*有效投资信号\*\*[:：]\s*(\d+)", r"有效投资信号[:：]\s*(\d+)", r"有效信号[:：]\s*(\d+)"], content)
+    if vc:
+        result["metrics"]["valid_count"] = vc
+    vr = _metric([r"\*\*信号有效率\*\*[:：]\s*([\d.]+%)", r"信号有效率[:：]\s*([\d.]+%)"], content)
+    if vr:
+        result["metrics"]["valid_rate"] = vr
+
+    # 按信号标题分块: 要求 #### 后跟数字编号（#### 1. 名称），避免把 ### 推荐投资信号 (9个) 误切
     signal_blocks = re.split(r"\n####\s*\d+\.\s*", content)
     for block in signal_blocks[1:]:  # 第一段是前言
         sig = {"name": "", "code": "", "action": "buy", "agent": "", "evidence": [], "risks": []}
-        # 首行: 名称 (代码)
+        # 首行: 名称 (代码) — 兼容全角括号、括号缺失
         first_line = block.split("\n", 1)[0].strip()
-        nm = re.match(r"(.+?)\s*\(([^)]+)\)", first_line)
+        nm = re.match(r"(.+?)\s*[\(（]([^)）]+)[\)）]", first_line)
         if nm:
             sig["name"] = nm.group(1).strip()
             sig["code"] = nm.group(2).strip()
         else:
             sig["name"] = first_line
 
-        # 动作
-        am = re.search(r"投资动作\*\*:\s*(\w+)", block)
+        # 投资动作 — 兼容 buy/买入/sell/卖出/hold/持有
+        am = re.search(r"\*\*投资动作\*\*[:：]\s*(\w+)", block)
         if am:
-            sig["action"] = am.group(1).strip().lower()
-        # 来源
-        ag = re.search(r"分析来源\*\*:\s*(.+)", block)
+            raw_action = am.group(1).strip().lower()
+            sig["action"] = "sell" if raw_action in ("sell", "卖出") else ("hold" if raw_action in ("hold", "持有") else "buy")
+        # 分析来源
+        ag = re.search(r"\*\*分析来源\*\*[:：]*(.+)", block)
         if ag:
             sig["agent"] = ag.group(1).strip()
 
-        # 证据: 每条以数字. 开头，结尾是 (来源: xxx, 时间: xxx)
-        ev_section = re.search(r"支撑证据.*?:\s*\n(.*?)(?=\n- \*\*风险|\Z)", block, flags=re.DOTALL)
+        # 证据: 每条以数字. 开头，结尾是 (来源: xxx, 时间: xxx) 或 （来源：xxx）
+        ev_section = re.search(r"支撑证据[^\n:：]*[:：]?\s*\n(.*?)(?=\n-\s*\*\*风险|\*\*风险|\Z)", block, flags=re.DOTALL)
         if ev_section:
-            for ev_match in re.finditer(r"\d+\.\s*\*\*(.+?)\*\*\s*\((来源:|来源：)(.+?)\)", ev_section.group(1), flags=re.DOTALL):
+            for ev_match in re.finditer(
+                r"\d+\.\s*\*\*(.+?)\*\*\s*[\(（]\s*(?:来源[:：]\s*)?(.+?)[\)）]",
+                ev_section.group(1), flags=re.DOTALL
+            ):
                 text = ev_match.group(1).strip()
-                meta = ev_match.group(3).strip()
+                meta = ev_match.group(2).strip()
                 src, t = "", ""
-                sm = re.search(r"(.+?)[:,，]\s*时间[:：]\s*(.+)", meta)
+                sm = re.search(r"(.+?)\s*[,，]\s*时间[:：]\s*(.+)", meta)
                 if sm:
                     src = sm.group(1).strip()
                     t = sm.group(2).strip()
@@ -568,10 +690,10 @@ def parse_structured(content: str) -> dict:
                 sig["evidence"].append({"text": text, "source": src, "time": t})
 
         # 风险: 风险提示后到下一个 #### / 免责声明 / 末尾
-        risk_section = re.search(r"风险提示\*\*:\s*\n(.*?)(?=\n####|\n##\s|免责声明|\Z)", block, flags=re.DOTALL)
+        risk_section = re.search(r"风险提示[^\n:：]*[:：]?\s*\n(.*?)(?=\n####|\n##\s|免责声明|\Z)", block, flags=re.DOTALL)
         if risk_section:
             for line in risk_section.group(1).split("\n"):
-                line = re.sub(r"^\s*[-•]\s*", "", line).strip()
+                line = re.sub(r"^\s*[-•·]\s*", "", line).strip()
                 # 跳过纯分隔线/标点行
                 if line and not re.fullmatch(r"[-_=*~]+", line):
                     sig["risks"].append(line)
@@ -584,12 +706,17 @@ def parse_structured(content: str) -> dict:
 
 def parse_data_report(content: str) -> dict:
     """把数据报告 markdown 解析成按数据 agent 分组的结构化数据。
-    剥掉开头元信息(标题/数据摘要/数据源分析详情)，每个 agent 的摘要正文 markdown 保留。"""
+
+    剥掉开头元信息(标题/数据摘要/数据源分析详情)，每个 agent 的摘要正文 markdown 保留。
+    宽松匹配：emoji 可选，但只切 h3 不切 h2 —— agent 标题用 ### 📈 XXX Agent，
+    正文子标题用 ## 一、...，避免把子标题误切成 agent。
+    """
     result = {"agents": []}
-    # 截取"数据源分析详情"之后的内容（跳过开头元信息）
-    m = re.search(r"数据源分析详情\s*\n(.+?)(?=\n##\s*⚠|免责声明|\Z)", content, flags=re.DOTALL)
+    # 截取"数据源分析详情"之后的内容（跳过开头元信息）— 兼容全角冒号/无冒号
+    m = re.search(r"数据源分析详情\s*[:：]?\s*\n(.+?)(?=\n##\s*⚠|免责声明|\Z)", content, flags=re.DOTALL)
     body = m.group(1) if m else content
-    # 按 ### 📈 XXX Agent 分块：emoji 必选，避免把正文里的 "### 1. xxx" 新闻小标题误切成 agent
+    # 只按 h3 + emoji 分块：agent 标题是 ### 📈 XXX Agent，正文子标题是 ## 一、... 或 ### 1. xxx（无 emoji）
+    # 用 emoji 作为 agent 标题的锚点，避免把 ### 1. 中东局势 误切成 agent
     blocks = re.split(r"^###\s+[📈📊🔍💡]\s+", body, flags=re.MULTILINE)
     for block in blocks:
         if not block.strip():
@@ -611,6 +738,10 @@ def parse_data_report(content: str) -> dict:
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
+    # 报告列表缓存：避免 8 秒轮询每次都 rglob 全量扫描
+    _reports_cache = None  # {"mtime": float, "data": {"dates": [...]}}
+    _reports_cache_time = 0.0
+
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
@@ -624,6 +755,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send_json(404, {"error": "not found"})
 
     def _list_reports(self):
+        # 缓存策略：目录 mtime 没变就复用缓存，否则重建
+        try:
+            dir_mtime = RESULTS_DIR.stat().st_mtime if RESULTS_DIR.exists() else 0
+        except OSError:
+            dir_mtime = 0
+        now = time.time()
+        cache = self.__class__._reports_cache
+        if cache and cache.get("mtime") == dir_mtime and now - self.__class__._reports_cache_time < 30:
+            self._send_json(200, cache["data"])
+            return
+
         # 按文件名时间戳把 final_report / data_report 配对成"运行组"，再按日期分组
         runs = {}  # (date, time) -> {"final": {...}, "data": {...}}
         if RESULTS_DIR.exists():
@@ -653,7 +795,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         for date in sorted(dates_map.keys(), reverse=True):
             date_runs = sorted(dates_map[date], key=lambda r: r["time"], reverse=True)
             dates.append({"date": date, "runs": date_runs})
-        self._send_json(200, {"dates": dates})
+        result = {"dates": dates}
+        self.__class__._reports_cache = {"mtime": dir_mtime, "data": result}
+        self.__class__._reports_cache_time = now
+        self._send_json(200, result)
 
     def _get_report(self, query):
         qs = urllib.parse.parse_qs(query)
@@ -667,12 +812,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
             content = full.read_text(encoding="utf-8")
             content = re.sub(r"\{self\.get_text\([^)]*\)\}", "免责声明", content)
             data = {"name": full.name, "content": content, "mtime": full.stat().st_mtime}
-            # 研究报告提供结构化解析
+
+            # 优先读取同名 .json（CLI 生成的结构化报告）— 完全绕过 markdown 正则解析
+            json_full = full.with_suffix(".json")
+            json_data = None
+            if json_full.is_file():
+                try:
+                    json_data = json.loads(json_full.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, OSError):
+                    json_data = None
+
             if want_structured and "research_reports" in rel_path:
-                data["structured"] = parse_structured(content)
+                if json_data and json_data.get("format") == "json":
+                    data["structured"] = json_data
+                    data["structured_source"] = "json"
+                else:
+                    data["structured"] = parse_structured(content)
+                    data["structured_source"] = "markdown"
             elif want_structured and "data_reports" in rel_path:
                 data["structured"] = parse_data_report(content)
                 data["report_type"] = "data"
+                data["structured_source"] = "markdown"
             self._send_json(200, data)
         except Exception as e:
             self._send_json(500, {"error": str(e)})

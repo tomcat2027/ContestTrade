@@ -472,7 +472,7 @@ class HotMoney(DataSourceBase):
             sort_field = "默认"
         
         descriptions = []
-        for _, row in top_10.iterrows():
+        for row in top_10.to_dict('records'):
             stock_name = row.get('ts_name', '')
             stock_code = row.get('ts_code', '')
             hm_name = row.get('hm_name', '')
@@ -507,7 +507,7 @@ class HotMoney(DataSourceBase):
             return ""
         
         descriptions = []
-        for _, row in df.iterrows():
+        for row in df.to_dict('records'):
             name = row.get('name', '')
             code = row.get('ts_code', '')
             
@@ -541,7 +541,7 @@ class HotMoney(DataSourceBase):
             return ""
         
         descriptions = []
-        for _, row in df.iterrows():
+        for row in df.to_dict('records'):
             stock_name = row.get('name', '')
             stock_code = row.get('ts_code', '')
             
@@ -575,7 +575,7 @@ class HotMoney(DataSourceBase):
             return ""
         
         descriptions = []
-        for _, row in df.iterrows():
+        for row in df.to_dict('records'):
             stock_name = row.get('name', '')
             stock_code = row.get('ts_code', '')
             
@@ -620,7 +620,7 @@ class HotMoney(DataSourceBase):
             top_stocks = df.head(10)
         
         descriptions = []
-        for _, row in top_stocks.iterrows():
+        for row in top_stocks.to_dict('records'):
             desc_parts = []
             
             if 'exalter' in row and pd.notna(row['exalter']):
@@ -665,7 +665,7 @@ class HotMoney(DataSourceBase):
             top_stocks = df.head(20)
         
         descriptions = []
-        for _, row in top_stocks.iterrows():
+        for row in top_stocks.to_dict('records'):
             stock_name = row.get('name', '')
             stock_code = row.get('ts_code', '')
             

@@ -37,6 +37,7 @@ class SimpleTradeCompany:
                 agent_name=agent_config["agent_name"],
                 final_target_tokens=agent_config.get("final_target_tokens", 4000),
                 bias_goal=agent_config.get("bias_goal", ""),
+                max_concurrent_tasks=agent_config.get("max_concurrent_tasks", 3),
             )
             self.data_agents[agent_config_idx] = DataAnalysisAgent(custom_config)
         
@@ -259,9 +260,18 @@ class SimpleTradeCompany:
         if agent_output:
             if "result" in agent_output and agent_output["result"]:
                 result_obj = agent_output["result"]
-                signals = self._parse_multiple_results(result_obj.final_result_thinking, result_obj.final_result)
+                # 优先用 research agent 已解析的 JSON signals（_parse_json_signals 已跑过）
+                # 注意：LangGraph 事件流只暴露 on_chain_end 的 output，可能不含 parsed_signals 字段
+                # 因此 main.py 自己再做一遍 JSON 优先 + XML 回退的解析
+                signals = self._parse_signals_robust(
+                    result_obj.final_result_thinking,
+                    result_obj.final_result,
+                )
             else:
-                signals = self._parse_multiple_results(agent_output.get("final_result_thinking", ""), agent_output.get("final_result", ""))
+                signals = self._parse_signals_robust(
+                    agent_output.get("final_result_thinking", ""),
+                    agent_output.get("final_result", ""),
+                )
 
             # 为每个信号添加agent信息，最多取5个信号
             valid_signals = []
@@ -278,31 +288,86 @@ class SimpleTradeCompany:
 
         return {"signals": signals, "events": agent_events} if signals else None
 
-    def _parse_multiple_results(self, thinking_result: str, output_result: str):
-        """解析多个信号结果"""
-        thinking = thinking_result.split("<Output>")[0].strip('\n').strip()
-        output = output_result.split("<Output>")[-1].strip('\n').strip()
-        
+    @staticmethod
+    def _parse_signals_robust(thinking_result: str, output_result: str):
+        """解析信号：优先 JSON，失败回退 XML 正则。返回标准化信号列表。"""
+        output = output_result.split("<Output>")[-1].strip('\n').strip() if output_result else ""
+
+        # 尝试 JSON 解析
+        json_signals = SimpleTradeCompany._try_parse_json_signals(output)
+        if json_signals is not None:
+            return json_signals
+
+        # 回退到原 XML 正则解析（保留旧报告兼容）
+        return SimpleTradeCompany._parse_multiple_results_xml(thinking_result, output)
+
+    @staticmethod
+    def _try_parse_json_signals(output: str):
+        """从 <Output>{JSON}</Output> 提取并解析信号；失败返回 None。
+        用栈匹配花括号，避免对嵌套 JSON 的非贪婪匹配失败。"""
+        try:
+            # 找 <Output>...</Output> 范围（开标签可有可无，应对 split 之后的情况）
+            m = re.search(r"(<Output>\s*)?(\{.*?\})\s*</Output>", output, flags=re.DOTALL)
+            if not m:
+                # 再尝试只匹配 {JSON} 块（无 Output 标签时）
+                m = re.search(r"\{[^{}]*\"signals\"[^{}]*\[.*\]\s*\}", output, flags=re.DOTALL)
+            if not m:
+                return None
+            json_str = m.group(2) if m.lastindex and m.lastindex >= 2 else m.group(1)
+            data = json.loads(json_str)
+            signals = data.get("signals")
+            if not isinstance(signals, list):
+                return None
+            normalized = []
+            for s in signals:
+                normalized.append({
+                    "has_opportunity": str(s.get("has_opportunity", "yes")).lower(),
+                    "action": str(s.get("action", "buy")).lower(),
+                    "symbol_code": str(s.get("symbol_code", "")).strip(),
+                    "symbol_name": str(s.get("symbol_name", "")).strip(),
+                    "evidence_list": [
+                        {
+                            "description": str(e.get("description", "")).strip(),
+                            "time": str(e.get("time", "N/A")).strip(),
+                            "from_source": str(e.get("from_source", "N/A")).strip(),
+                        }
+                        for e in (s.get("evidence_list") or [])
+                        if isinstance(e, dict)
+                    ],
+                    "limitations": [str(l).strip() for l in (s.get("limitations") or []) if str(l).strip()],
+                    "probability": str(s.get("probability", "")).strip(),
+                    "thinking": "",
+                })
+            return normalized
+        except (json.JSONDecodeError, ValueError, TypeError, AttributeError):
+            return None
+
+    @staticmethod
+    def _parse_multiple_results_xml(thinking_result: str, output: str):
+        """原 XML 正则解析（兼容旧报告）。"""
+        thinking = thinking_result.split("<Output>")[0].strip('\n').strip() if thinking_result else ""
+
         signals = []
         try:
             # 查找所有signal块
             signal_blocks = re.findall(r'<signal>(.*?)</signal>', output, flags=re.DOTALL)
-            
+
             for signal_block in signal_blocks:
                 try:
-                    signal = self._parse_single_signal_block(signal_block, thinking)
+                    signal = SimpleTradeCompany._parse_single_signal_block(signal_block, thinking)
                     if signal:
                         signals.append(signal)
                 except Exception as e:
-                    print(f"Error parsing individual signal: {e}")
+                    logger.error(f"Error parsing individual signal: {e}")
                     continue
-        
+
         except Exception as e:
-            print(f"Error parsing multiple results: {e}")
-        
+            logger.error(f"Error parsing multiple results: {e}")
+
         return signals
 
-    def _parse_single_signal_block(self, signal_block: str, thinking: str):
+    @staticmethod
+    def _parse_single_signal_block(signal_block: str, thinking: str):
         """解析单个信号块（容错版：标签闭合错误/字段缺失不全丢）"""
         try:
             def _field(tag: str, default: str = "") -> str:
@@ -367,7 +432,7 @@ class SimpleTradeCompany:
                 "probability": probability,
             }
         except Exception as e:
-            print(f"Error parsing single signal block: {e}")
+            logger.error(f"Error parsing single signal block: {e}")
             return None
 
     # LangGraph工作流创建

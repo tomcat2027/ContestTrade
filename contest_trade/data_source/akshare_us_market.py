@@ -99,7 +99,7 @@ class AkshareUSMarket(DataSourceBase):
                 return []
             
             news_list = []
-            for _, row in df.head(limit).iterrows():
+            for row in df.head(limit).to_dict('records'):
                 news_item = {
                     'title': row.get('title', ''),
                     'content': row.get('content', ''),

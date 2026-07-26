@@ -11,6 +11,7 @@ import sys
 import httpx
 import asyncio
 import time
+import random
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Dict, List, Optional, AsyncIterator, Callable, Any
@@ -407,39 +408,38 @@ class LLMModel(BaseAgentModel):
         """Preprocess messages using the provider's preprocessing."""
         return self.provider.preprocess_messages(messages)
 
-    async def a_run_with_semaphore(
-        self,
-        messages: List[Dict[str, str]],
-        temperature: float = 0.7,
-        max_tokens: Optional[int] = None,
-        max_retries: Optional[int] = None,
-        retry_delay: Optional[float] = None,
-        timeout: Optional[float] = None,
-        semaphore: Optional[asyncio.Semaphore] = None,
-        **kwargs
-    ) -> ModelResponse[str]:
-        """
-        Run the model asynchronously and stream the response with retry mechanism.
-        
-        This is the primary implementation that all other methods
-        (run, a_run, stream_run) will use as their base.
-        """
-        async with semaphore:
-            try:
-                response = await self.a_run(
-                    messages, 
-                    temperature=temperature, 
-                    max_tokens=max_tokens, 
-                    max_retries=max_retries, 
-                    retry_delay=retry_delay, 
-                    timeout=timeout, 
-                    **kwargs
-                )
-                return response
-            except Exception as e:
-                print(f"Error: {e}")
-                return None
+    # ---- 重试 / 退避 内部 helper（a_run 与 a_stream_run 共用）----
+    @staticmethod
+    def _is_rate_limit_error(e: Exception) -> bool:
+        """识别 429 限流：openai 官方库的 RateLimitError 或 status_code==429。"""
+        if getattr(e, 'status_code', None) == 429:
+            return True
+        try:
+            import openai
+            if isinstance(e, openai.RateLimitError):
+                return True
+        except (ImportError, AttributeError):
+            pass
+        return False
 
+    @staticmethod
+    def _compute_backoff(attempt: int, retry_delay: float, is_rate_limit: bool) -> float:
+        """指数退避 + 随机抖动。429 时退避加倍，上限 240 秒。"""
+        base = retry_delay if retry_delay else 20.0
+        backoff = min(base * (2 ** attempt), 120)
+        if is_rate_limit:
+            backoff = min(backoff * 2, 240)
+        backoff += random.uniform(0, 5)
+        return backoff
+
+    async def _sleep_with_backoff(self, attempt: int, max_retries: int, retry_delay: float, e: Exception):
+        """计算退避并 sleep，同时打印日志。"""
+        is_rate_limit = self._is_rate_limit_error(e)
+        backoff = self._compute_backoff(attempt, retry_delay, is_rate_limit)
+        tag = " (429限流,退避加倍)" if is_rate_limit else ""
+        print(f"🔄 LLM API调用失败 (尝试 {attempt + 1}/{max_retries + 1}): {type(e).__name__}: {e}{tag}")
+        print(f"⏳ 等待 {backoff:.1f} 秒后重试...")
+        await asyncio.sleep(backoff)
 
     async def a_run(
         self,
@@ -547,16 +547,14 @@ class LLMModel(BaseAgentModel):
                 )
             except Exception as e:
                 if attempt < max_retries:
-                    print(f"🔄 LLM API调用失败 (尝试 {attempt + 1}/{max_retries + 1}): {type(e).__name__}: {e}")
-                    print(f"⏳ 等待 {retry_delay} 秒后重试...")
-                    await asyncio.sleep(retry_delay)
+                    await self._sleep_with_backoff(attempt, max_retries, retry_delay, e)
                     continue
                 else:
                     call_elapsed = time.time() - call_start
                     logger.error(f"[耗时] LLM调用最终失败 ({model_name}): {call_elapsed:.2f}秒")
                     print(f"❌ LLM API调用最终失败，已重试 {max_retries} 次: {type(e).__name__}: {e}")
                     raise
-    
+
 
     async def a_stream_run(
         self,
@@ -615,20 +613,17 @@ class LLMModel(BaseAgentModel):
                             should_retry = True
                     except ImportError:
                         pass
-                
+
                 # Always retry on these common exceptions
                 if isinstance(e, (asyncio.TimeoutError, ConnectionError, TimeoutError)):
                     should_retry = True
-                
+
                 if should_retry and attempt < max_retries:
-                    print(f"🔄 LLM API调用失败 (尝试 {attempt + 1}/{max_retries + 1}): {type(e).__name__}: {e}")
-                    print(f"⏳ 等待 {retry_delay} 秒后重试...")
-                    await asyncio.sleep(retry_delay)
+                    await self._sleep_with_backoff(attempt, max_retries, retry_delay, e)
                     continue
                 else:
                     print(f"❌ LLM API调用最终失败，已重试 {max_retries} 次: {type(e).__name__}: {e}")
                     raise
-
 
     async def _internal_a_stream_run(
         self,

@@ -56,17 +56,17 @@ finnhub_key: ""
 
 llm:
   provider: "openai"
-  base_url: "https://api.longcat.chat/openai"
-  # 从环境变量 LONGCAT_API_KEY 读取，或填写占位符
-  api_key: "YOUR_LONGCAT_API_KEY"
-  model_name: "LongCat-2.0"
+  base_url: "https://token.sensenova.cn/v1"
+  # 从环境变量 DEEPSEEK_API_KEY 读取（sensenova 端点，按 base_url 匹配注入）
+  api_key: "YOUR_DEEPSEEK_API_KEY"
+  model_name: "deepseek-v4-flash"
 
 llm_thinking:
   provider: "openai"
-  base_url: "https://api.longcat.chat/openai"
-  # 从环境变量 LONGCAT_API_KEY 读取，或填写占位符
-  api_key: "YOUR_LONGCAT_API_KEY"
-  model_name: "LongCat-2.0"
+  base_url: "https://token.sensenova.cn/v1"
+  # flash 无 reasoner，退化为普通调用，reasoning_content 为空
+  api_key: "YOUR_DEEPSEEK_API_KEY"
+  model_name: "deepseek-v4-flash"
 
 vlm:
   provider: "openai"

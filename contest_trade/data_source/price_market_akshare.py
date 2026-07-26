@@ -84,17 +84,18 @@ class PriceMarketAkshare(DataSourceBase):
                         logger.warning(f"{info['name']} 无{trade_date}之前的数据")
                         continue
                     
-                    # 转换为所需格式
-                    data_list = []
-                    for _, row in filtered_df.iterrows():
-                        data_list.append({
-                            'trade_date': row['date'].strftime('%Y%m%d'),
-                            'open_price': float(row['open']),
-                            'high_price': float(row['high']),
-                            'low_price': float(row['low']),
-                            'close_price': float(row['close']),
-                            'trade_lots': int(row['volume'])
-                        })
+                    # 转换为所需格式 — 列表推导比 iterrows 快 5-10 倍
+                    data_list = [
+                        {
+                            'trade_date': row.date.strftime('%Y%m%d'),
+                            'open_price': float(row.open),
+                            'high_price': float(row.high),
+                            'low_price': float(row.low),
+                            'close_price': float(row.close),
+                            'trade_lots': int(row.volume)
+                        }
+                        for row in filtered_df.itertuples()
+                    ]
                     
                     kline_data[stock_code] = {
                         'name': info['name'],
@@ -209,22 +210,22 @@ class PriceMarketAkshare(DataSourceBase):
             # 取前10个板块
             top_sectors = df.head(10)
             
-            for _, row in top_sectors.iterrows():
+            for row in top_sectors.itertuples():
                 try:
-                    sector_name = row['板块名称']
-                    latest_price = row['最新价']
-                    change_amount = row['涨跌额']
-                    change_rate = row['涨跌幅']
-                    market_cap = row['总市值'] / 100000000  # 转换为亿元
-                    turnover_rate = row['换手率']
-                    up_count = row['上涨家数']
-                    down_count = row['下跌家数']
-                    leading_stock = row['领涨股票']
+                    sector_name = row.板块名称
+                    latest_price = row.最新价
+                    change_amount = row.涨跌额
+                    change_rate = row.涨跌幅
+                    market_cap = row.总市值 / 100000000  # 转换为亿元
+                    turnover_rate = row.换手率
+                    up_count = row.上涨家数
+                    down_count = row.下跌家数
+                    leading_stock = row.领涨股票
                     leading_change = row['领涨股票-涨跌幅']
-                    
+
                     change_sign = "+" if change_amount >= 0 else ""
                     rate_sign = "+" if change_rate >= 0 else ""
-                    
+
                     summary_lines.append(
                         f"**{sector_name}**: 最新价 {latest_price:.2f}, "
                         f"涨跌 {change_sign}{change_amount:.2f} ({rate_sign}{change_rate:.2f}%), "

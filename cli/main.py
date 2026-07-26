@@ -446,7 +446,15 @@ def run_contest_analysis_interactive(trigger_time: str, market: str):
                     # 生成研究报告
                     markdown_content, report_path = generate_final_report(final_state, results_dir)
                     display.add_message(get_text("报告", "Report"), get_text(f"✅ 研究报告已生成: {report_path.name}", f"✅ Research report generated: {report_path.name}"))
-                    
+
+                    # 同时写一份 JSON 报告供 web 直接读取（绕过 markdown 正则解析）
+                    try:
+                        from .static.report_template import generate_final_report_json
+                        json_path = generate_final_report_json(final_state, results_dir)
+                        display.add_message(get_text("报告", "Report"), get_text(f"✅ JSON 报告: {json_path.name}", f"✅ JSON report: {json_path.name}"))
+                    except Exception as json_err:
+                        display.add_message("警告", f"⚠️ JSON 报告生成失败（web 会回退到 markdown）: {json_err}")
+
                     # 生成数据报告
                     factors_data = load_factors_data(trigger_time)
                     if factors_data and factors_data.get('agents'):
@@ -967,6 +975,14 @@ def run(
                     # 生成研究报告
                     markdown_content, report_path = generate_final_report(final_state, results_dir)
                     console.print(f"[green]📄 研究报告已生成: {report_path}[/green]")
+
+                    # 同时写 JSON 报告供 web 读取
+                    try:
+                        from .static.report_template import generate_final_report_json
+                        json_path = generate_final_report_json(final_state, results_dir)
+                        console.print(f"[green]📄 JSON 报告: {json_path}[/green]")
+                    except Exception as json_err:
+                        console.print(f"[yellow]⚠️ JSON 报告生成失败: {json_err}[/yellow]")
 
                     # 生成数据报告
                     factors_data = load_factors_data(trigger_time)

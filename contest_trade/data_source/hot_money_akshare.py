@@ -303,15 +303,19 @@ class HotMoneyAkshare(DataSourceBase):
                 sections.append(f"**涨停股票**: 共{zt_count}只")
                 sections.append(f"**连板分布**: {dict(lianbao_stats)}")
                 sections.append("**主要涨停股票**:")
-                for _, row in top_zt.iterrows():
-                    sections.append(f"- {row['名称']}({row['代码']}): {row['涨跌幅']:.2f}%, 连板{row['连板数']}天, 炸板{row['炸板次数']}次")
-            
+                sections.extend(
+                    f"- {row.名称}({row.代码}): {row.涨跌幅:.2f}%, 连板{row.连板数}天, 炸板{row.炸板次数}次"
+                    for row in top_zt.itertuples()
+                )
+
             if not dt_data.empty:
                 dt_count = len(dt_data)
                 sections.append(f"**跌停股票**: 共{dt_count}只")
                 if dt_count <= 5:
-                    for _, row in dt_data.iterrows():
-                        sections.append(f"- {row['名称']}({row['代码']}): {row['涨跌幅']:.2f}%, 连续跌停{row['连续跌停']}天")
+                    sections.extend(
+                        f"- {row.名称}({row.代码}): {row.涨跌幅:.2f}%, 连续跌停{row.连续跌停}天"
+                        for row in dt_data.itertuples()
+                    )
         
         # 龙虎榜分析
         if not lhb_data.empty:
@@ -326,10 +330,12 @@ class HotMoneyAkshare(DataSourceBase):
             
             if not recent_lhb.empty and recent_count <= 10:
                 sections.append("**当日主要龙虎榜股票**:")
-                for _, row in recent_lhb.head(5).iterrows():
-                    net_buy = row.get('龙虎榜净买额', 0)
-                    net_buy_str = f"{net_buy/10000:.0f}万" if abs(net_buy) < 100000000 else f"{net_buy/100000000:.2f}亿"
-                    sections.append(f"- {row['名称']}({row['代码']}): {row['涨跌幅']:.2f}%, 净买额{net_buy_str}")
+                def _net_buy_str(v):
+                    return f"{v/10000:.0f}万" if abs(v) < 100000000 else f"{v/100000000:.2f}亿"
+                sections.extend(
+                    f"- {row.名称}({row.代码}): {row.涨跌幅:.2f}%, 净买额{_net_buy_str(row.龙虎榜净买额)}"
+                    for row in recent_lhb.head(5).itertuples()
+                )
         
         # 机构数据分析
         if not lhb_jg_data.empty:
@@ -344,9 +350,10 @@ class HotMoneyAkshare(DataSourceBase):
             top_jg = lhb_jg_data.head(3)
             if not top_jg.empty:
                 sections.append("**主要机构参与股票**:")
-                for _, row in top_jg.iterrows():
-                    net_buy = row.get('机构买入净额', 0)
-                    sections.append(f"- {row['名称']}: 机构净买额{net_buy/10000:.0f}万元")
+                sections.extend(
+                    f"- {row.名称}: 机构净买额{row.机构买入净额/10000:.0f}万元"
+                    for row in top_jg.itertuples()
+                )
         
         # 概念板块热度
         if not concept_data.empty:
@@ -354,12 +361,12 @@ class HotMoneyAkshare(DataSourceBase):
             
             top_concepts = concept_data.head(5)
             sections.append("**热门概念板块**:")
-            for _, row in top_concepts.iterrows():
-                up_count = row.get('上涨家数', 0)
-                down_count = row.get('下跌家数', 0)
+            for row in top_concepts.itertuples():
+                up_count = row.上涨家数
+                down_count = row.下跌家数
                 total_count = up_count + down_count
                 up_ratio = (up_count / total_count * 100) if total_count > 0 else 0
-                sections.append(f"- {row['板块名称']}: {row['涨跌幅']:.2f}%, 上涨率{up_ratio:.0f}%({up_count}/{total_count})")
+                sections.append(f"- {row.板块名称}: {row.涨跌幅:.2f}%, 上涨率{up_ratio:.0f}%({up_count}/{total_count})")
         
         # 游资营业部活跃度
         if not yyb_data.empty:
@@ -370,9 +377,10 @@ class HotMoneyAkshare(DataSourceBase):
             
             top_yyb = yyb_data.head(3)
             sections.append("**主要活跃营业部**:")
-            for _, row in top_yyb.iterrows():
-                yyb_name = row['营业部名称']
-                sections.append(f"- {yyb_name}: 今日操作{row['今日最高操作']}次, 最高金额{row['今日最高金额']}")
+            sections.extend(
+                f"- {row.营业部名称}: 今日操作{row.今日最高操作}次, 最高金额{row.今日最高金额}"
+                for row in top_yyb.itertuples()
+            )
         
         return "\n".join(sections)
 

@@ -237,25 +237,27 @@ Your submission should include following parts for EACH opportunity you identify
 """
 
 prompt_for_research_invest_output_format = """
-<signals>
-<signal>
-<has_opportunity>xxx</has_opportunity>  # yes or no
-<action>xxx</action>  # buy or sell
-<symbol_code>xxx</symbol_code>     # such as 600519.SH or TSLA
-<symbol_name>xxx</symbol_name>  # such as 贵州茅台 or tesla
-<evidence_list>        # no more than 20 evidences
-<evidence>xxx</evidence>   # a detailed evidence description, including convincing logical inferences which support your suggestion. About 100 words.
-<time>xxx</time>           # evidence time
-<from_source>xxx</from_source>   # evidence source, from which media name or website name or tools name
-...
-</evidence_list>
-<limitations>
-<limitation>xxx</limitation>   # limitations of your suggestion, such as risk, etc.
-...
-</limitations>
-<probability>xxx</probability>  # 0-100
-</signal>
-<!-- Repeat <signal>...</signal> block for each opportunity you identify, up to 5 signals -->
-<!-- Only include signals for genuine opportunities you find in the market -->
-</signals>
+<Output>
+{
+  "signals": [
+    {
+      "has_opportunity": "yes",           // yes or no
+      "action": "buy",                     // buy or sell
+      "symbol_code": "600519.SH",          // such as 600519.SH or TSLA
+      "symbol_name": "贵州茅台",           // such as 贵州茅台 or tesla
+      "evidence_list": [                   // no more than 20 evidences
+        {
+          "description": "a detailed evidence description, including convincing logical inferences which support your suggestion. About 100 words.",
+          "time": "2026-07-21",            // evidence time
+          "from_source": "财联社"           // evidence source, from which media name or website name or tools name
+        }
+      ],
+      "limitations": ["risk 1", "risk 2"], // limitations of your suggestion
+      "probability": 75                    // 0-100
+    }
+  ]
+}
+</Output>
+
+IMPORTANT: Output ONLY the <Output>{JSON}</Output> block above. Do not wrap in markdown code fences. Do not add any text before <Output> or after </Output>. Valid JSON only (double quotes, no trailing commas).
 """

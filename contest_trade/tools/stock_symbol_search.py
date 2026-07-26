@@ -54,7 +54,7 @@ def search_single_query(symbols_df: pd.DataFrame, query: str, limit: int, match_
     """Search for a single query"""
     results = []
     
-    for _, row in symbols_df.iterrows():
+    for row in symbols_df.to_dict('records'):
         ts_code = row.get('ts_code', '')
         name = row.get('name', '')
         

@@ -21,15 +21,15 @@ polygon_key: ""
 
 llm:
   provider: "openai"
-  base_url: "https://api.longcat.chat/openai"
-  api_key: "" # 从环境变量 LONGCAT_API_KEY 读取
-  model_name: "LongCat-2.0"
+  base_url: "https://token.sensenova.cn/v1"
+  api_key: "" # 从环境变量 DEEPSEEK_API_KEY 读取（sensenova 端点）
+  model_name: "deepseek-v4-flash"
 
 llm_thinking:
   provider: "openai"
-  base_url: "https://api.longcat.chat/openai"
-  api_key: "" # 从环境变量 LONGCAT_API_KEY 读取
-  model_name: "LongCat-2.0"
+  base_url: "https://token.sensenova.cn/v1"
+  api_key: "" # 从环境变量 DEEPSEEK_API_KEY 读取（flash 无 reasoner）
+  model_name: "deepseek-v4-flash"
 
 vlm:
   provider: "openai"

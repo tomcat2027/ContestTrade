@@ -25,6 +25,7 @@ from typing import List, Dict, Optional, Union
 from enum import Enum
 from pathlib import Path
 from dataclasses import dataclass
+from loguru import logger
 from utils.tushare_utils import pro_cached
 from utils.fmp_utils import get_us_stock_price, fmp_cached
 from config.config import cfg
@@ -500,7 +501,7 @@ class MarketManager:
 
             except Exception as e:
                 if verbose:
-                    print(f"缓存文件读取失败: {e}")
+                    logger.error(f"缓存文件读取失败: {e}")
         
         # 方法2：尝试使用AKShare（获取后保存到缓存）
         if market_name in ["CN-Stock", "CN-ETF", "CSI300", "CSI500", "CSI1000"]:
@@ -533,7 +534,7 @@ class MarketManager:
 
             except Exception as e:
                 if verbose:
-                    print(f"AKShare获取交易日历失败: {e}")
+                    logger.error(f"AKShare获取交易日历失败: {e}")
         
         # 方法3：最后使用Tushare作为fallback（仅在有有效token时）
         # 检查是否有有效的tushare_key
@@ -571,7 +572,7 @@ class MarketManager:
         else:
             # 无有效token，报错
             if verbose:
-                print(f"无有效的Tushare token，且AKShare获取失败，无法获取交易日历")
+                logger.error("无有效的Tushare token，且AKShare获取失败，无法获取交易日历")
             raise ValueError(f"获取{market_name}交易日历失败：AKShare失败且无有效Tushare token")
 
     def get_symbol_price(self, market_name: str, symbol: str, trigger_time: str, date_diff: int = 0):
@@ -632,11 +633,9 @@ class MarketManager:
         elif market_name == "HK-Stock":
             return None
         elif market_name == "US-Stock":
-            print(f"get_symbol_price: {market_name} {symbol} {target_trade_date}")
-            
             try:
                 # 获取指定日期的历史数据（使用FMP默认前复权价格，适用于回测）
-                df = get_us_stock_price(symbol, target_trade_date, target_trade_date, 
+                df = get_us_stock_price(symbol, target_trade_date, target_trade_date,
                                       adjusted=True, adj_base_date=None, verbose=False)
                 if not df.empty:
                     # 转换为与tushare格式兼容的字典
@@ -654,10 +653,9 @@ class MarketManager:
                         'vol': row.get('volume', 0),
                         'amount': row.get('volume', 0) * row['close']  # 估算成交额
                     }
-                    print(price_data)
                     return price_data
             except Exception as e:
-                print(f"FMP数据获取失败，尝试tushare: {e}")
+                logger.error(f"FMP数据获取失败，尝试tushare: {e}")
        
             return None
         else:
@@ -691,12 +689,8 @@ class MarketManager:
         else:
             raise ValueError(f"Invalid market: {market_name}")
 
-    def accept_trade(self, symbol: str, action: str, trigger_time: str):
-        # check if the trade is accepted by the market
-        pass
-
     def is_market_trading(self, market_name: str, trigger_time: str):
-        # check if the market is trading at given trigger_time  
+        # check if the market is trading at given trigger_time
         trigger_date = trigger_time.split(" ")[0].replace("-", "")
         trade_date = self.get_trade_date(market_name)
         if market_name in ["CN-Stock", "CN-ETF", "US-Stock", "CSI300", "CSI500", "CSI1000"]:
@@ -706,25 +700,7 @@ class MarketManager:
             return False
         else:
             raise ValueError(f"Invalid market: {market_name}")
-        
-    def is_available_symbol(self, market_name: str, symbol: str):
-        # check if the symbol is custom symbol
-        for symbol_config in self.custom_symbols:
-            if symbol_config["market"] == market_name and symbol_config["symbol"] == symbol:
-                return True
-        
-        # check if the symbol is in the market
-        if market_name in ["CN-Stock", "CN-ETF", "US-Stock", "HK-Stock", "CSI300", "CSI500", "CSI1000"]:
-            try:
-                market_symbols = self.get_market_symbols(market_name, "2025-06-30 15:00:00")
-                return symbol in market_symbols['ts_code'].values
-            except Exception as e:
-                print(f"Error checking symbol {symbol} in market {market_name}: {e}")
-                return False
-        else:
-            raise ValueError(f"Invalid market: {market_name}")
-        return False
-    
+
     def get_trading_config(self, market_name: str) -> TradingCostConfig:
         """获取指定市场的交易成本配置"""
         return self.config.trading_configs.get(market_name, TradingCostConfig())
@@ -846,7 +822,7 @@ class MarketManager:
             if stock_act_code != symbol_code:
                 if stock_act_code != "None":
                     if verbose:
-                        print(f"set stock_code: {symbol_code} to {stock_act_code}")
+                        logger.debug(f"set stock_code: {symbol_code} to {stock_act_code}")
                     symbol_code = stock_act_code
             stock_act_name = stock_code2name.get(symbol_code, "xxxxx")
             # name 为空时直接用 code 反查的 name 补全
@@ -854,7 +830,7 @@ class MarketManager:
                 symbol_name = stock_act_name
             elif stock_act_name in symbol_name and stock_act_name != symbol_name:
                 if verbose:
-                    print(f"set stock_name: {symbol_name} to {stock_act_name}")
+                    logger.debug(f"set stock_name: {symbol_name} to {stock_act_name}")
                 if stock_act_name != "xxxxx":
                     symbol_name = stock_act_name
         else:
@@ -908,7 +884,7 @@ class MarketManager:
                 print(f"股票基本信息缓存不存在: {cache_path}")
                 return None
         except Exception as e:
-            print(f"读取股票基本信息缓存失败: {e}")
+            logger.error(f"读取股票基本信息缓存失败: {e}")
             return None
 
     def _get_us_stock_basic_cache(self):
@@ -925,7 +901,7 @@ class MarketManager:
                 print(f"美股基本信息缓存不存在: {cache_path}")
                 return None
         except Exception as e:
-            print(f"读取美股基本信息缓存失败: {e}")
+            logger.error(f"读取美股基本信息缓存失败: {e}")
             return None
 
     def _save_trade_calendar_cache(self, trade_dates: list):
@@ -946,7 +922,7 @@ class MarketManager:
                 json.dump(cache_data, f, ensure_ascii=False, indent=2)
             print(f"交易日历缓存已更新: {cache_file}")
         except Exception as e:
-            print(f"保存交易日历缓存失败: {e}")
+            logger.error(f"保存交易日历缓存失败: {e}")
 
     def _get_csi_components_cache(self, index_code: str):
         cache_file_map = {
@@ -971,7 +947,7 @@ class MarketManager:
                 print(f"指数成分股缓存不存在: {cache_path}")
                 return None
         except Exception as e:
-            print(f"读取指数成分股缓存失败: {e}")
+            logger.error(f"读取指数成分股缓存失败: {e}")
             return None
 
     def get_total_namechange(self, market_name: str):
