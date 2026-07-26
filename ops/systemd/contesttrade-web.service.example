@@ -7,6 +7,7 @@ After=network-online.target
 Type=simple
 WorkingDirectory=__PROJECT_DIR__
 EnvironmentFile=-__PROJECT_DIR__/.env
+EnvironmentFile=-%h/.config/contesttrade/environment
 Environment=PYTHONUNBUFFERED=1
 Environment=CONTESTTRADE_WEB_HOST=0.0.0.0
 Environment=CONTESTTRADE_WEB_PORT=8765

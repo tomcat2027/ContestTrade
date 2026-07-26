@@ -7,6 +7,7 @@ After=network-online.target
 Type=oneshot
 WorkingDirectory=__PROJECT_DIR__
 EnvironmentFile=-__PROJECT_DIR__/.env
+EnvironmentFile=-%h/.config/contesttrade/environment
 Environment=CONTEST_TRADE_RUN_TIMEOUT_SECONDS=1800
 ExecStart=__PROJECT_DIR__/scripts/run_scheduled.sh
 TimeoutStartSec=1900

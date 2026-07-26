@@ -75,6 +75,19 @@ systemctl --user daemon-reload
 systemctl --user enable --now contesttrade-web.service contesttrade-run.timer
 ```
 
+如服务器需要固定代理，可创建仅当前用户可读的环境文件，两个服务会自动加载：
+
+```bash
+mkdir -p "$HOME/.config/contesttrade"
+chmod 700 "$HOME/.config/contesttrade"
+cat > "$HOME/.config/contesttrade/environment" <<'EOF'
+HTTP_PROXY=http://proxy-host:port
+HTTPS_PROXY=http://proxy-host:port
+NO_PROXY=127.0.0.1,localhost
+EOF
+chmod 600 "$HOME/.config/contesttrade/environment"
+```
+
 定时器在周一至周五 08:00（`Asia/Shanghai`）唤醒，运行脚本会再查询沪深交易日历，节假日正常跳过。`Persistent=true` 会在服务器错过触发时间后于下次启动时补跑。
 
 检查状态：
