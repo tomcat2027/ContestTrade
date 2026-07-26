@@ -304,43 +304,10 @@ class SimpleTradeCompany:
     @staticmethod
     def _try_parse_json_signals(output: str):
         """从 <Output>{JSON}</Output> 提取并解析信号；失败返回 None。
-        用栈匹配花括号，避免对嵌套 JSON 的非贪婪匹配失败。"""
-        try:
-            # 找 <Output>...</Output> 范围（开标签可有可无，应对 split 之后的情况）
-            m = re.search(r"(<Output>\s*)?(\{.*?\})\s*</Output>", output, flags=re.DOTALL)
-            if not m:
-                # 再尝试只匹配 {JSON} 块（无 Output 标签时）
-                m = re.search(r"\{[^{}]*\"signals\"[^{}]*\[.*\]\s*\}", output, flags=re.DOTALL)
-            if not m:
-                return None
-            json_str = m.group(2) if m.lastindex and m.lastindex >= 2 else m.group(1)
-            data = json.loads(json_str)
-            signals = data.get("signals")
-            if not isinstance(signals, list):
-                return None
-            normalized = []
-            for s in signals:
-                normalized.append({
-                    "has_opportunity": str(s.get("has_opportunity", "yes")).lower(),
-                    "action": str(s.get("action", "buy")).lower(),
-                    "symbol_code": str(s.get("symbol_code", "")).strip(),
-                    "symbol_name": str(s.get("symbol_name", "")).strip(),
-                    "evidence_list": [
-                        {
-                            "description": str(e.get("description", "")).strip(),
-                            "time": str(e.get("time", "N/A")).strip(),
-                            "from_source": str(e.get("from_source", "N/A")).strip(),
-                        }
-                        for e in (s.get("evidence_list") or [])
-                        if isinstance(e, dict)
-                    ],
-                    "limitations": [str(l).strip() for l in (s.get("limitations") or []) if str(l).strip()],
-                    "probability": str(s.get("probability", "")).strip(),
-                    "thinking": "",
-                })
-            return normalized
-        except (json.JSONDecodeError, ValueError, TypeError, AttributeError):
-            return None
+        用 utils.json_signal_parser 统一实现。
+        """
+        from utils.json_signal_parser import parse_and_normalize
+        return parse_and_normalize(output)
 
     @staticmethod
     def _parse_multiple_results_xml(thinking_result: str, output: str):

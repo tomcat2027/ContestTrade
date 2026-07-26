@@ -26,6 +26,7 @@ from tools.tool_utils import ToolManager, ToolManagerConfig
 from config.config import cfg, PROJECT_ROOT
 from langchain_core.runnables import RunnableConfig
 from utils.market_manager import GLOBAL_MARKET_MANAGER
+from utils.json_signal_parser import parse_and_normalize as _parse_json_signals
 
 @dataclass
 class ResearchAgentInput:
@@ -322,7 +323,7 @@ class ResearchAgent:
             state["final_result_thinking"] = result_result.reasoning_content
 
             # 尝试从输出解析 JSON 信号（优先），失败则回退到 XML 正则
-            parsed_signals = self._parse_json_signals(result_result.content)
+            parsed_signals = _parse_json_signals(result_result.content)
             if parsed_signals is not None:
                 state["parsed_signals"] = parsed_signals
                 logger.info(f"[write_result] JSON 解析成功: {len(parsed_signals)} 个信号")
@@ -347,44 +348,6 @@ class ResearchAgent:
         logger.info(f"[耗时] write_result 完成: {step_elapsed:.2f}秒")
         return state
 
-    @staticmethod
-    def _parse_json_signals(content: str):
-        """从 LLM 输出中提取 <Output>{JSON}</Output> 并解析为结构化信号列表。
-        解析失败返回 None（由调用方回退到 XML 正则）。"""
-        if not content:
-            return None
-        try:
-            m = re.search(r"<Output>\s*(\{.*?\})\s*</Output>", content, flags=re.DOTALL)
-            if not m:
-                return None
-            data = json.loads(m.group(1))
-            signals = data.get("signals")
-            if not isinstance(signals, list):
-                return None
-            # 标准化每个信号字段
-            normalized = []
-            for s in signals:
-                normalized.append({
-                    "has_opportunity": str(s.get("has_opportunity", "yes")).lower(),
-                    "action": str(s.get("action", "buy")).lower(),
-                    "symbol_code": str(s.get("symbol_code", "")).strip(),
-                    "symbol_name": str(s.get("symbol_name", "")).strip(),
-                    "evidence_list": [
-                        {
-                            "description": str(e.get("description", "")).strip(),
-                            "time": str(e.get("time", "N/A")).strip(),
-                            "from_source": str(e.get("from_source", "N/A")).strip(),
-                        }
-                        for e in (s.get("evidence_list") or [])
-                        if isinstance(e, dict)
-                    ],
-                    "limitations": [str(l).strip() for l in (s.get("limitations") or []) if str(l).strip()],
-                    "probability": str(s.get("probability", "")).strip(),
-                })
-            return normalized
-        except (json.JSONDecodeError, ValueError, TypeError, AttributeError):
-            return None
-    
     async def _submit_result(self, state: ResearchAgentState) -> ResearchAgentState:
         """Write the result to a file"""
         try:

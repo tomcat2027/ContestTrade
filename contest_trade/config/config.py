@@ -38,56 +38,73 @@ class ProjectConfig:
         # Store the market type for reference
         self.market_type = market_type
 
+    # provider 识别 → 对应环境变量名
+    # 优先级：列表中靠前的先匹配；都未命中则用最后的 fallback 列表
+    _LLM_KEY_PROVIDERS = [
+        ("longcat",     "LONGCAT_API_KEY"),
+        ("sensenova",   "DEEPSEEK_API_KEY"),
+        ("deepseek",    "DEEPSEEK_API_KEY"),
+        ("minimax",     "MINIMAX_API_KEY"),
+        ("dashscope",   "DASHSCOPE_API_KEY"),
+    ]
+    _VLM_KEY_PROVIDERS = _LLM_KEY_PROVIDERS  # VLM 复用同一张表
+    _LLM_KEY_FALLBACK_CHAIN = [
+        "LONGCAT_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "MINIMAX_API_KEY",
+        "DASHSCOPE_API_KEY",
+    ]
+
+    def _resolve_key_from_base_url(self, base_url: str, providers: list, fallback_chain: list):
+        """根据 base_url 子串匹配返回环境变量名；未匹配时返回 fallback_chain 中第一个有值的 var 名（None 表示都无值）。"""
+        url_lower = (base_url or "").lower()
+        for substring, env_name in providers:
+            if substring in url_lower:
+                return env_name
+        # 未匹配：按 fallback chain 找第一个有值的
+        for env_name in fallback_chain:
+            if os.environ.get(env_name):
+                return env_name
+        return None
+
     def _load_secrets_from_env(self):
-        """从环境变量加载敏感配置，优先于 YAML 中的值"""
-        # LLM API Key：按配置文件实际指向的端点匹配对应 key
-        # base_url 含 longcat -> LONGCAT_API_KEY；含 sensenova/deepseek -> DEEPSEEK_API_KEY
-        # 都不匹配时回退顺序：LONGCAT -> DEEPSEEK -> DASHSCOPE
-        llm_base = (self.llm.get("base_url", "") if hasattr(self, "llm") else "").lower()
-        if "longcat" in llm_base:
-            llm_key = os.environ.get("LONGCAT_API_KEY")
-        elif "sensenova" in llm_base or "deepseek" in llm_base:
-            llm_key = os.environ.get("DEEPSEEK_API_KEY")
-        else:
-            llm_key = os.environ.get("LONGCAT_API_KEY") or os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("DASHSCOPE_API_KEY")
-        if llm_key:
-            if hasattr(self, "llm"):
-                self.llm["api_key"] = llm_key
-            if hasattr(self, "llm_thinking"):
-                self.llm_thinking["api_key"] = llm_key
+        """从环境变量加载敏感配置，优先于 YAML 中的值。"""
+        # LLM API Key：按 base_url 匹配 provider，再决定 env var
+        if hasattr(self, "llm"):
+            env_name = self._resolve_key_from_base_url(
+                self.llm.get("base_url", ""),
+                self._LLM_KEY_PROVIDERS,
+                self._LLM_KEY_FALLBACK_CHAIN,
+            )
+            if env_name and os.environ.get(env_name):
+                self.llm["api_key"] = os.environ[env_name]
+                if hasattr(self, "llm_thinking"):
+                    self.llm_thinking["api_key"] = os.environ[env_name]
 
-        # VLM API Key：按 vlm 配置的 base_url 匹配对应 key（与 LLM 同逻辑）
-        vlm_base = (self.vlm.get("base_url", "") if hasattr(self, "vlm") else "").lower()
-        if "longcat" in vlm_base:
-            vlm_key = os.environ.get("LONGCAT_API_KEY")
-        elif "minimax" in vlm_base:
-            vlm_key = os.environ.get("MINIMAX_API_KEY")
-        elif "sensenova" in vlm_base or "deepseek" in vlm_base:
-            vlm_key = os.environ.get("DEEPSEEK_API_KEY")
-        else:
-            vlm_key = llm_key
-        if vlm_key and hasattr(self, "vlm"):
-            self.vlm["api_key"] = vlm_key
+        # VLM API Key：复用 LLM 的 provider 表 + fallback
+        if hasattr(self, "vlm"):
+            env_name = self._resolve_key_from_base_url(
+                self.vlm.get("base_url", ""),
+                self._VLM_KEY_PROVIDERS,
+                self._LLM_KEY_FALLBACK_CHAIN,
+            )
+            if env_name and os.environ.get(env_name):
+                self.vlm["api_key"] = os.environ[env_name]
 
-        # Tushare Key
-        if os.environ.get("TUSHARE_KEY"):
-            self.tushare_key = os.environ.get("TUSHARE_KEY")
-
-        # 搜索 API Keys
-        if os.environ.get("BOCHA_API_KEY"):
-            self.bocha_key = os.environ.get("BOCHA_API_KEY")
-        if os.environ.get("SERP_API_KEY"):
-            self.serp_key = os.environ.get("SERP_API_KEY")
-
-        # 美股 API Keys
-        if os.environ.get("FMP_KEY"):
-            self.fmp_key = os.environ.get("FMP_KEY")
-        if os.environ.get("FINNHUB_KEY"):
-            self.finnhub_key = os.environ.get("FINNHUB_KEY")
-        if os.environ.get("POLYGON_KEY"):
-            self.polygon_key = os.environ.get("POLYGON_KEY")
-        if os.environ.get("ALPHA_VANTAGE_KEY"):
-            self.alpha_vantage_key = os.environ.get("ALPHA_VANTAGE_KEY")
+        # 数据/搜索/US Provider Keys：每个独立 env var，直接覆盖
+        _SINGLE_KEY_OVERRIDES = [
+            ("TUSHARE_KEY",        "tushare_key"),
+            ("BOCHA_API_KEY",      "bocha_key"),
+            ("SERP_API_KEY",       "serp_key"),
+            ("FMP_KEY",            "fmp_key"),
+            ("FINNHUB_KEY",        "finnhub_key"),
+            ("POLYGON_KEY",        "polygon_key"),
+            ("ALPHA_VANTAGE_KEY",  "alpha_vantage_key"),
+        ]
+        for env_name, attr in _SINGLE_KEY_OVERRIDES:
+            val = os.environ.get(env_name)
+            if val and hasattr(self, attr):
+                setattr(self, attr, val)
 
 cfg = ProjectConfig()
 
