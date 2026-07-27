@@ -290,10 +290,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._list_reports()
         elif path == "/api/health":
             self._get_health()
+        elif path == "/api/host-health":
+            self._get_host_health()
         elif path == "/api/report":
             self._get_report(parsed.query)
         else:
             self._send_json(404, {"error": "not found"})
+
+    def _get_host_health(self):
+        from contest_trade.operations.host_monitor import read_host_health
+
+        health = read_host_health()
+        self._send_json(200 if health["status"] == "healthy" else 503, health)
 
     def do_POST(self):
         path = urllib.parse.urlparse(self.path).path

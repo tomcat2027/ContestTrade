@@ -1,0 +1,15 @@
+[Unit]
+Description=ContestTrade host heartbeat and reboot monitor
+After=local-fs.target
+
+[Service]
+Type=simple
+WorkingDirectory=__PROJECT_DIR__
+Environment=PYTHONUNBUFFERED=1
+Environment=CONTESTTRADE_HOST_MONITOR_INTERVAL_SECONDS=30
+ExecStart=__PROJECT_DIR__/.venv/bin/python -m contest_trade.operations.host_monitor
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

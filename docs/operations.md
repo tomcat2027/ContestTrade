@@ -67,12 +67,12 @@ loginctl show-user "$USER" -p Linger
 ```bash
 cd /absolute/path/to/ContestTrade
 mkdir -p "$HOME/.config/systemd/user"
-for unit in contesttrade-web.service contesttrade-run.service contesttrade-run.timer; do
+for unit in contesttrade-web.service contesttrade-run.service contesttrade-run.timer contesttrade-host-monitor.service; do
   sed "s|__PROJECT_DIR__|$PWD|g" "ops/systemd/$unit.example" \
     > "$HOME/.config/systemd/user/$unit"
 done
 systemctl --user daemon-reload
-systemctl --user enable --now contesttrade-web.service contesttrade-run.timer
+systemctl --user enable --now contesttrade-web.service contesttrade-run.timer contesttrade-host-monitor.service
 ```
 
 如服务器需要固定代理，可创建仅当前用户可读的环境文件，两个服务会自动加载：
@@ -99,6 +99,9 @@ systemctl --user status contesttrade-web.service
 systemctl --user list-timers contesttrade-run.timer
 journalctl --user -u contesttrade-web.service -u contesttrade-run.service
 ```
+
+主机监控每 30 秒把负载、内存、磁盘、启动 ID 和最后在线时间写入
+`contest_trade/agents_workspace/runtime/host_heartbeat.json`。正常停止会写入停止标记；若机器被硬复位，下次启动会把事件追加到 `host_incidents.jsonl`。登录网站后可通过 `/api/host-health` 查看当前心跳和最近 20 次异常事件。
 
 ## 4. Linux cron（备选）
 
