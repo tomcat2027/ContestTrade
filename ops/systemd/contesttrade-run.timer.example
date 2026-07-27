@@ -1,8 +1,8 @@
 [Unit]
-Description=Run ContestTrade at 08:00 on mainland trading days
+Description=Run ContestTrade from 08:00 with hourly recovery retries
 
 [Timer]
-OnCalendar=Mon..Fri *-*-* 08:00:00 Asia/Shanghai
+OnCalendar=Mon..Fri *-*-* 08..23:00:00 Asia/Shanghai
 Persistent=true
 AccuracySec=1min
 Unit=contesttrade-run.service
