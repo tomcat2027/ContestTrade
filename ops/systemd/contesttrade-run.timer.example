@@ -2,6 +2,7 @@
 Description=Run ContestTrade from 08:00 with hourly recovery retries
 
 [Timer]
+OnBootSec=2min
 OnCalendar=Mon..Fri *-*-* 08..23:00:00 Asia/Shanghai
 Persistent=true
 AccuracySec=1min

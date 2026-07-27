@@ -10,7 +10,7 @@ cd "$PROJECT_DIR"
 # cannot permanently lose the 08:00 run. Keep retries idempotent: once today's
 # report succeeds, every later wake-up exits without calling data or LLM APIs.
 set +e
-"$PROJECT_DIR/.venv/bin/python" - <<'PY'
+resume_trigger_time=$("$PROJECT_DIR/.venv/bin/python" - <<'PY'
 import json
 import os
 import sys
@@ -31,8 +31,17 @@ except (FileNotFoundError, OSError, json.JSONDecodeError, TypeError):
     health = {}
 
 trigger_time = str(health.get("trigger_time") or "")
-if health.get("status") in {"success", "degraded"} and trigger_time[:10] == today.isoformat():
+same_day = trigger_time[:10] == today.isoformat()
+if health.get("status") in {"success", "degraded"} and same_day:
     sys.exit(20)
+
+resume_trigger_time = ""
+if health.get("status") in {"running", "failed"} and same_day:
+    try:
+        datetime.strptime(trigger_time, "%Y-%m-%d %H:%M:%S")
+        resume_trigger_time = trigger_time
+    except ValueError:
+        pass
 
 # The mainland calendar endpoint is directly reachable from the deployment
 # network. Do not make this single preflight depend on an optional proxy.
@@ -40,8 +49,11 @@ for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_prox
     os.environ.pop(name, None)
 calendar = ak.tool_trade_date_hist_sina()
 trade_dates = set(pd.to_datetime(calendar["trade_date"]).dt.date)
-sys.exit(0 if today in trade_dates else 10)
+if today not in trade_dates:
+    sys.exit(10)
+print(resume_trigger_time)
 PY
+)
 calendar_status=$?
 set -e
 
@@ -58,7 +70,15 @@ if [ "$calendar_status" -ne 0 ]; then
   exit "$calendar_status"
 fi
 
-exec "$PROJECT_DIR/.venv/bin/contesttrade" run \
-  --market CN-Stock \
-  --silent \
+run_args=(
+  run
+  --market CN-Stock
+  --silent
   --timeout-seconds "$TIMEOUT_SECONDS"
+)
+if [ -n "$resume_trigger_time" ]; then
+  echo "$(date -Iseconds) resume: $resume_trigger_time"
+  run_args+=(--trigger-time "$resume_trigger_time")
+fi
+
+exec "$PROJECT_DIR/.venv/bin/contesttrade" "${run_args[@]}"

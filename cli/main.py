@@ -868,6 +868,11 @@ def display_detailed_report(final_state: Dict):
 def run(
     market: Optional[str] = typer.Option("CN-Stock", "--market", "-m", help="市场（仅支持 CN-Stock）"),
     silent: bool = typer.Option(False, "--silent", "-s", help="静默模式，无交互确认，直接运行"),
+    trigger_time: Optional[str] = typer.Option(
+        None,
+        "--trigger-time",
+        help="复用指定触发时间（YYYY-MM-DD HH:MM:SS），用于中断恢复",
+    ),
     timeout_seconds: int = typer.Option(
         1800,
         "--timeout-seconds",
@@ -897,8 +902,17 @@ def run(
     # 设置环境变量 - 这样全局的 cfg 就会读取对应的配置
     os.environ['CONTEST_TRADE_MARKET'] = market
 
-    # 根据市场获取对应的触发时间
-    trigger_time = get_trigger_time_for_market(market, silent=silent)
+    # 正常运行使用当前时间；恢复运行可复用原触发时间，从已有 Agent 结果续算。
+    if trigger_time:
+        try:
+            trigger_time = datetime.strptime(trigger_time, "%Y-%m-%d %H:%M:%S").strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
+        except ValueError:
+            console.print("[red]--trigger-time 格式必须为 YYYY-MM-DD HH:MM:SS[/red]")
+            raise typer.Exit(2)
+    else:
+        trigger_time = get_trigger_time_for_market(market, silent=silent)
 
     # 验证触发时间
     if not trigger_time:
